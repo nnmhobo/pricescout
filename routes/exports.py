@@ -36,7 +36,43 @@ COLUMN_NAMES = {
 }
 
 
+# Gold / silver / bronze fills for top-3 prices within each `item_label`
+# group. The leading colour matches the in-app UI medal palette.
+_MEDAL_FILLS = {
+    1: ("FFF4C7", "8A6B0A"),  # gold-ish background, dark amber text
+    2: ("E5E5E5", "454c54"),  # silver
+    3: ("F4DBC1", "8a4a17"),  # bronze
+}
+
+
 def _build_excel(results: list, label: str) -> tuple[bytes, str]:
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    # Compute the per-group price rank BEFORE we drop columns / rename —
+    # we still have `item_label` and `price` in the original list shape.
+    # `ranks` is parallel to `results`: ranks[i] is 1/2/3 or None.
+    grouped_prices: dict[str, list[float]] = {}
+    for r in results:
+        p = r.get("price")
+        if p is None:
+            continue
+        key = r.get("item_label") or r.get("name") or ""
+        grouped_prices.setdefault(key, []).append(float(p))
+    # Distinct sorted prices per group → 1/2/3 lookup; tied prices share a rank.
+    group_rank_table: dict[str, dict[float, int]] = {}
+    for key, prices in grouped_prices.items():
+        ordered = sorted(set(prices))
+        group_rank_table[key] = {p: i + 1 for i, p in enumerate(ordered[:3])}
+
+    ranks: list[int | None] = []
+    for r in results:
+        p = r.get("price")
+        if p is None:
+            ranks.append(None)
+            continue
+        key = r.get("item_label") or r.get("name") or ""
+        ranks.append(group_rank_table.get(key, {}).get(float(p)))
+
     df = pd.DataFrame(results)
     if "specs" in df.columns:
         df["specs"] = df["specs"].apply(
@@ -56,13 +92,31 @@ def _build_excel(results: list, label: str) -> tuple[bytes, str]:
         for col in ws.columns:
             w = max(len(str(c.value or "")) for c in col)
             ws.column_dimensions[col[0].column_letter].width = min(w + 4, 60)
-        from openpyxl.styles import Font, PatternFill, Alignment
         fill = PatternFill("solid", fgColor="141820")
         font = Font(bold=True, color="FFFFFF", size=11)
         for cell in ws[1]:
             cell.fill      = fill
             cell.font      = font
             cell.alignment = Alignment(horizontal="center")
+
+        # Apply the medal fill to the entire row for top-3 entries in each
+        # group. Row offset = 2 because Excel is 1-indexed and row 1 is
+        # the header. `price_col_idx` is the column index for "Ціна за од."
+        # which gets the bold medal text colour on top of the row fill.
+        header_row = [c.value for c in ws[1]]
+        try:
+            price_col_idx = header_row.index(COLUMN_NAMES["price"]) + 1
+        except ValueError:
+            price_col_idx = None
+        for row_idx, rank in enumerate(ranks, start=2):
+            if rank is None or rank not in _MEDAL_FILLS:
+                continue
+            bg, fg = _MEDAL_FILLS[rank]
+            row_fill = PatternFill("solid", fgColor=bg)
+            for cell in ws[row_idx]:
+                cell.fill = row_fill
+            if price_col_idx is not None:
+                ws.cell(row=row_idx, column=price_col_idx).font = Font(bold=True, color=fg)
     return output.getvalue(), filename
 
 

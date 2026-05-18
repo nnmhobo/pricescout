@@ -327,23 +327,43 @@
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(i);
       });
+      // Per-group: rank distinct prices (1=cheapest, 2=second, 3=third).
+      // Suppliers tied on the same price share the same rank so two stores
+      // both at 100 ₴ both get the gold medal. Ranks past 3 get no medal.
+      // Style: gold/silver/bronze background + medal emoji bullet on the
+      // supplier cell. Best (rank 1) also bolds the price in teal.
+      const MEDAL_STYLES = {
+        1: { bg: 'rgba(255,215,0,0.18)',   text: '#a8800f', medal: '🥇', label: '1 місце' },
+        2: { bg: 'rgba(192,192,192,0.22)', text: '#5e6770', medal: '🥈', label: '2 місце' },
+        3: { bg: 'rgba(205,127,50,0.18)',  text: '#a05a1f', medal: '🥉', label: '3 місце' },
+      };
       const rows = [];
       groups.forEach((sups, label) => {
         const prices = sups.map(s => s.price).filter(p => p != null);
-        const minPrice = prices.length ? Math.min(...prices) : null;
+        // Distinct sorted prices → rank index. Lookup with .indexOf.
+        const ranked = Array.from(new Set(prices)).sort((a, b) => a - b);
+        const rankOf = p => (p == null ? null : ranked.indexOf(p) + 1);
+        const top3 = ranked.slice(0, 3);
+        const topLine = top3.length
+          ? top3.map((p, i) => `${MEDAL_STYLES[i + 1].medal} ${Number(p).toLocaleString('uk-UA')} ₴`).join(' · ')
+          : '';
         rows.push(`<tr class="result-group-header">
           <td colspan="9" style="background:var(--paper2);font-weight:600;color:var(--ink);padding:8px 12px;font-size:12px;border-top:2px solid var(--border2)">
             ${esc(label)}
             <span style="font-size:10px;color:var(--ink3);margin-left:8px;font-weight:400">
-              ${sups.length} ${sups.length === 1 ? 'постачальник' : 'постачальників'}${minPrice != null ? ' · мін. ' + Number(minPrice).toLocaleString('uk-UA') + ' ₴' : ''}
+              ${sups.length} ${sups.length === 1 ? 'постачальник' : 'постачальників'}${topLine ? ' · ' + topLine : ''}
             </span>
           </td>
         </tr>`);
         sups.forEach(i => {
-          const isBest = minPrice != null && i.price === minPrice;
-          rows.push(`<tr${isBest ? ' style="background:rgba(26,107,90,0.06)"' : ''}>
-              <td class="td-name"><a href="${esc(i.url||'#')}" target="_blank" rel="noopener">${esc(i.name||'—')}</a></td>
-              <td class="td-price"${isBest ? ' style="font-weight:600;color:var(--teal)"' : ''}>${i.price ? Number(i.price).toLocaleString('uk-UA')+'<span class="curr">₴</span>' : '—'}</td>
+          const rank = rankOf(i.price);
+          const medal = rank && rank <= 3 ? MEDAL_STYLES[rank] : null;
+          const rowStyle = medal ? ` style="background:${medal.bg}"` : '';
+          const priceStyle = medal ? ` style="font-weight:600;color:${medal.text}"` : '';
+          const medalBadge = medal ? `<span title="${medal.label}" style="margin-right:6px;font-size:14px">${medal.medal}</span>` : '';
+          rows.push(`<tr${rowStyle}>
+              <td class="td-name">${medalBadge}<a href="${esc(i.url||'#')}" target="_blank" rel="noopener">${esc(i.name||'—')}</a></td>
+              <td class="td-price"${priceStyle}>${i.price ? Number(i.price).toLocaleString('uk-UA')+'<span class="curr">₴</span>' : '—'}</td>
               <td class="td-unit">${esc(i.unit||'—')}</td>
               <td class="td-qty" style="font-family:var(--mono);font-size:11px">${i.qty != null ? Number(i.qty).toLocaleString('uk-UA') : '—'}</td>
               <td class="td-unit-est" style="font-family:var(--mono);font-size:11px;color:var(--ink3)">${esc(i.unit_estimate||'—')}</td>
