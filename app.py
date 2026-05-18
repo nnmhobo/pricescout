@@ -1,5 +1,7 @@
 """PriceScout — Flask app factory."""
 import os
+import time
+from pathlib import Path
 from dotenv import load_dotenv
 from flask import Flask, render_template
 
@@ -21,9 +23,28 @@ app.register_blueprint(kostoris_bp)
 app.register_blueprint(projects_bp)
 
 
+def _asset_version() -> str:
+    """Bust the browser cache for static/js/app.js and static/css/app.css.
+
+    Uses the newer of the two files' mtime so editing either CSS or JS
+    forces a fresh fetch — otherwise users keep running the old JS until
+    they hit Ctrl-Shift-R, and Result-tab features look broken.
+    """
+    static_dir = Path(app.root_path) / "static"
+    candidates = [static_dir / "js" / "app.js", static_dir / "css" / "app.css"]
+    mtimes = [p.stat().st_mtime for p in candidates if p.exists()]
+    if not mtimes:
+        return str(int(time.time()))
+    return str(int(max(mtimes)))
+
+
 @app.route("/")
 def index():
-    return render_template("index.html", suppliers=SUPPLIERS_CONFIG)
+    return render_template(
+        "index.html",
+        suppliers=SUPPLIERS_CONFIG,
+        asset_version=_asset_version(),
+    )
 
 
 if __name__ == "__main__":
