@@ -314,6 +314,8 @@
   function loadResults() {
     fetch('/api/results').then(r => r.json()).then(items => {
       if (!items.length) return;
+      // Stash for the comment editor (needs current comment as default).
+      window._currentResults = items;
       document.getElementById('cnt-badge').textContent = ' (' + items.length + ')';
       const badgeTotal = document.getElementById('badge-total');
       if (badgeTotal) badgeTotal.textContent = items.length + ' постачальників';
@@ -361,9 +363,25 @@
           const rowStyle = medal ? ` style="background:${medal.bg}"` : '';
           const priceStyle = medal ? ` style="font-weight:600;color:${medal.text}"` : '';
           const medalBadge = medal ? `<span title="${medal.label}" style="margin-right:6px;font-size:14px">${medal.medal}</span>` : '';
+          const itemId = esc(i.item_id || '');
+          const supplierId = esc(i.supplier_id || '');
+          const canEdit = itemId && supplierId;
+          // Manual-price indicator: italic + tooltip carries the original.
+          const manualMark = i.manual_price != null
+            ? `<span title="${esc('Виправлено вручну. Оригінал: ' + (i.original_price != null ? Number(i.original_price).toLocaleString('uk-UA') + ' ₴' : '—'))}" style="margin-left:4px;font-size:10px;color:var(--ink3);font-style:italic">✎</span>`
+            : '';
+          const commentMark = i.comment
+            ? `<span title="${esc(i.comment)}" style="margin-left:6px;font-size:13px">💬</span>`
+            : '';
+          const priceCell = canEdit
+            ? `<a href="#" onclick="return editResultPrice('${itemId}','${supplierId}',${i.manual_price != null ? Number(i.manual_price) : (i.price != null ? Number(i.price) : 'null')})" style="text-decoration:none;color:inherit;border-bottom:1px dotted var(--border2)" title="Натисніть, щоб виправити ціну">${i.price ? Number(i.price).toLocaleString('uk-UA')+'<span class="curr">₴</span>' : '—'}</a>${manualMark}`
+            : `${i.price ? Number(i.price).toLocaleString('uk-UA')+'<span class="curr">₴</span>' : '—'}${manualMark}`;
+          const commentBtn = canEdit
+            ? `<button onclick="editResultComment('${itemId}','${supplierId}')" style="background:transparent;border:none;cursor:pointer;padding:2px 4px;font-size:13px;color:var(--ink3)" title="${i.comment ? 'Редагувати коментар' : 'Додати коментар'}">${i.comment ? '💬' : '🗨️'}</button>`
+            : commentMark;
           rows.push(`<tr${rowStyle}>
-              <td class="td-name">${medalBadge}<a href="${esc(i.url||'#')}" target="_blank" rel="noopener">${esc(i.name||'—')}</a></td>
-              <td class="td-price"${priceStyle}>${i.price ? Number(i.price).toLocaleString('uk-UA')+'<span class="curr">₴</span>' : '—'}</td>
+              <td class="td-name">${medalBadge}<a href="${esc(i.url||'#')}" target="_blank" rel="noopener">${esc(i.name||'—')}</a>${commentMark}</td>
+              <td class="td-price"${priceStyle}>${priceCell}</td>
               <td class="td-unit">${esc(i.unit||'—')}</td>
               <td class="td-qty" style="font-family:var(--mono);font-size:11px">${i.qty != null ? Number(i.qty).toLocaleString('uk-UA') : '—'}</td>
               <td class="td-unit-est" style="font-family:var(--mono);font-size:11px;color:var(--ink3)">${esc(i.unit_estimate||'—')}</td>
@@ -371,6 +389,7 @@
               <td class="td-brand">${esc(i.brand||'—')}</td>
               <td class="td-sup">${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener" style="color:var(--ink2);text-decoration:none;border-bottom:1px solid var(--border2)">${esc(i.supplier||'—')}</a>` : `<span>${esc(i.supplier||'—')}</span>`}${i.seller_note ? `<span style="font-size:10px;color:var(--ink3);margin-left:5px;font-family:var(--mono)">${esc(i.seller_note)}</span>` : ''}</td>
               <td class="td-sku">${esc(i.sku||'—')}</td>
+              <td class="td-actions" style="text-align:center;width:36px">${commentBtn}</td>
             </tr>`);
         });
       });
@@ -379,11 +398,67 @@
           <thead><tr>
             <th>Назва товару</th><th>Ціна за од.</th><th>Од.</th>
             <th>К-сть</th><th>Од. кошт.</th><th>Загальна</th>
-            <th>Бренд</th><th>Постачальник</th><th>Артикул</th>
+            <th>Бренд</th><th>Постачальник</th><th>Артикул</th><th></th>
           </tr></thead>
           <tbody>${rows.join('')}</tbody>
         </table>`;
     });
+  }
+
+  // ── Result hand-edits ────────────────────────────────────────
+  // Two endpoints user can hit on any result row:
+  //   - editResultPrice — corrects a misparsed unit price (or clears the
+  //     override with an empty input).
+  //   - editResultComment — attaches a free-form note that rides along
+  //     into the Excel export.
+  function editResultPrice(itemId, supplierId, currentPrice) {
+    const current = (currentPrice == null || Number.isNaN(currentPrice)) ? '' : String(currentPrice);
+    const next = window.prompt(
+      'Введіть виправлену ціну в грн.\nПорожньо — відновити автоматичну ціну.',
+      current
+    );
+    if (next === null) return false;  // cancelled
+    const trimmed = next.trim();
+    let payload;
+    if (trimmed === '') {
+      payload = { manual_price: null };
+    } else {
+      const num = Number(trimmed.replace(',', '.'));
+      if (!Number.isFinite(num) || num <= 0) {
+        alert('Невалідна ціна — введіть число більше нуля.');
+        return false;
+      }
+      payload = { manual_price: num };
+    }
+    _patchResult(itemId, supplierId, payload);
+    return false;
+  }
+
+  function editResultComment(itemId, supplierId) {
+    const row = (window._currentResults || []).find(r =>
+      String(r.item_id) === String(itemId) && String(r.supplier_id) === String(supplierId)
+    );
+    const current = (row && row.comment) || '';
+    const next = window.prompt(
+      'Коментар до позиції (буде експортований у Excel).\nПорожньо — видалити коментар.',
+      current
+    );
+    if (next === null) return;
+    _patchResult(itemId, supplierId, { comment: next.trim() || null });
+  }
+
+  function _patchResult(itemId, supplierId, payload) {
+    fetch(`/api/results/${encodeURIComponent(itemId)}/${encodeURIComponent(supplierId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) { alert(d.error); return; }
+        loadResults();  // re-render with the spliced override
+      })
+      .catch(() => alert('Не вдалося оновити рядок.'));
   }
 
   // ── Exports ───────────────────────────────────────────────────

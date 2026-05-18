@@ -16,7 +16,7 @@ COLUMN_ORDER = ["item_label",
                 "name", "price", "currency", "unit",
                 "qty", "unit_estimate", "total_price",
                 "brand", "sku",
-                "specs", "supplier", "url", "date_scraped"]
+                "specs", "supplier", "comment", "url", "date_scraped"]
 
 COLUMN_NAMES = {
     "item_label":    "Матеріал кошторису",
@@ -31,6 +31,7 @@ COLUMN_NAMES = {
     "sku":           "Артикул",
     "specs":         "Характеристики",
     "supplier":      "Постачальник",
+    "comment":       "Коментар",
     "url":           "Посилання",
     "date_scraped":  "Дата",
 }

@@ -15,14 +15,19 @@ bp = Blueprint("projects", __name__)
 
 
 def _enrich_items(items: list) -> list:
-    """Add best_price, total_best, total_estimate, saving_pct to each item."""
+    """Add best_price, total_best, total_estimate, saving_pct to each item.
+
+    Honours `manual_price` if the user corrected the parser's price by
+    hand: the corrected value participates in best-price selection just
+    like a freshly scraped one.
+    """
     result = []
     for item in items:
         sups = item.get("suppliers", {})
         prices = [
-            (v["last_price"], sid)
+            (v.get("manual_price") if v.get("manual_price") is not None else v["last_price"], sid)
             for sid, v in sups.items()
-            if v.get("found") and v.get("last_price")
+            if v.get("found") and (v.get("manual_price") is not None or v.get("last_price"))
         ]
         prices.sort(key=lambda x: x[0])
         best_price = prices[0][0] if prices else None

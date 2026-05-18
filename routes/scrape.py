@@ -11,7 +11,8 @@ from runner import (
     _clamp_parallel,
     _apply_limit,
 )
-from item_db import load_items, add_item
+from item_db import load_items, add_item, set_result_override
+from runner import _apply_overrides, _sort_results
 from suppliers import SUPPLIERS as SUPPLIERS_CONFIG
 
 bp = Blueprint("scrape", __name__)
@@ -135,3 +136,57 @@ def config():
 @bp.route("/api/results")
 def results():
     return jsonify(state["results"])
+
+
+@bp.route("/api/results/<item_id>/<supplier_id>", methods=["PATCH"])
+def patch_result(item_id, supplier_id):
+    """Persist a hand-edit to a scraped result.
+
+    Body (all keys optional):
+      - manual_price: number → override the parsed price.
+                      Send null to clear.
+      - comment:      string → free-form note carried into Excel.
+                      Send "" / null to clear.
+
+    After persisting we re-apply overrides over the current run's results
+    so the Results tab updates without a re-scrape.
+    """
+    data = request.json or {}
+    kwargs = {}
+    if "manual_price" in data:
+        raw = data["manual_price"]
+        if raw in (None, "", "null"):
+            kwargs["manual_price"] = None
+        else:
+            try:
+                kwargs["manual_price"] = float(str(raw).replace(",", "."))
+            except (TypeError, ValueError):
+                return jsonify({"error": "Невалідна ціна"}), 400
+    if "comment" in data:
+        c = data["comment"]
+        kwargs["comment"] = None if c in (None, "") else str(c).strip()
+
+    if not kwargs:
+        return jsonify({"error": "Нічого оновлювати"}), 400
+
+    set_result_override(item_id, supplier_id, **kwargs)
+
+    # Re-splice overrides into the in-memory run so the UI sees the change
+    # without a full re-scrape. Strip our own splice fields first so we
+    # don't double-stack `original_price` on repeat edits.
+    refreshed = []
+    for r in state["results"]:
+        clean = {k: v for k, v in r.items()
+                 if k not in ("manual_price", "comment", "original_price")}
+        # Restore original price before re-applying overrides.
+        if r.get("original_price") is not None:
+            clean["price"] = r["original_price"]
+        refreshed.append(clean)
+    state["results"] = _sort_results(_apply_overrides(refreshed))
+
+    updated = next(
+        (r for r in state["results"]
+         if r.get("item_id") == item_id and r.get("supplier_id") == supplier_id),
+        None,
+    )
+    return jsonify({"status": "ok", "result": updated})

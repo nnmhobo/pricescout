@@ -53,6 +53,16 @@ def _migrate(conn):
     if "project_id" not in cols:
         conn.execute("ALTER TABLE items ADD COLUMN project_id TEXT")
 
+    # Per-result manual overrides: lets the user correct a misread price
+    # straight from the Results tab and leave a free-form comment that
+    # rides along into the Excel export. Stored on supplier_entries so it
+    # survives app restarts; cleared automatically when the row is dropped.
+    se_cols = {r[1] for r in conn.execute("PRAGMA table_info(supplier_entries)").fetchall()}
+    if "manual_price" not in se_cols:
+        conn.execute("ALTER TABLE supplier_entries ADD COLUMN manual_price REAL")
+    if "comment" not in se_cols:
+        conn.execute("ALTER TABLE supplier_entries ADD COLUMN comment TEXT")
+
     # Projects table
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS projects (
@@ -159,12 +169,15 @@ def _load_suppliers(conn, item_id: str) -> dict:
     rows = conn.execute(
         "SELECT * FROM supplier_entries WHERE item_id=?", (item_id,)
     ).fetchall()
+    keys = rows[0].keys() if rows else []
     return {
         r["supplier_id"]: {
             "url":          r["url"],
             "found":        bool(r["found"]),
             "last_checked": r["last_checked"],
             "last_price":   r["last_price"],
+            "manual_price": r["manual_price"] if "manual_price" in keys else None,
+            "comment":      r["comment"]      if "comment"      in keys else None,
         }
         for r in rows
     }
@@ -303,17 +316,93 @@ def delete_item(item_id: str):
 
 def update_supplier_entry(item_id: str, supplier_id: str,
                           url: str | None, found: bool, price: float | None):
+    """Persist a fresh scrape result. Preserves any existing manual_price
+    / comment override so the user's hand edits aren't wiped on the next run.
+    """
     now = datetime.now().strftime("%d.%m.%Y %H:%M")
     with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT manual_price, comment FROM supplier_entries WHERE item_id=? AND supplier_id=?",
+            (item_id, supplier_id),
+        ).fetchone()
+        manual_price = existing["manual_price"] if existing else None
+        comment = existing["comment"] if existing else None
         conn.execute("""
-            INSERT OR REPLACE INTO supplier_entries(item_id,supplier_id,url,found,last_checked,last_price)
-            VALUES(?,?,?,?,?,?)
-        """, (item_id, supplier_id, url, int(found), now, price))
+            INSERT OR REPLACE INTO supplier_entries
+                (item_id, supplier_id, url, found, last_checked, last_price, manual_price, comment)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (item_id, supplier_id, url, int(found), now, price, manual_price, comment))
         if found and price:
             conn.execute(
                 "INSERT INTO price_history (item_id, supplier_id, price, checked_at) VALUES (?, ?, ?, ?)",
                 (item_id, supplier_id, price, now)
             )
+
+
+def set_result_override(item_id: str, supplier_id: str, *,
+                        manual_price: float | None = ..., comment: str | None = ...):
+    """Set per-result hand-corrections that ride along with the scrape.
+
+    ``manual_price=None`` clears the manual price; ``comment=None`` clears
+    the comment. Passing the sentinel default (``...``) leaves that field
+    alone — so callers can update one without touching the other.
+
+    Creates a `supplier_entries` row if none exists yet (e.g. user adds a
+    comment before the scrape has run).
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM supplier_entries WHERE item_id=? AND supplier_id=?",
+            (item_id, supplier_id),
+        ).fetchone()
+        if row is None:
+            conn.execute(
+                """INSERT INTO supplier_entries
+                       (item_id, supplier_id, found, manual_price, comment)
+                   VALUES (?, ?, 0, ?, ?)""",
+                (item_id, supplier_id,
+                 None if manual_price is ... else manual_price,
+                 None if comment is ... else comment),
+            )
+            return
+        sets, vals = [], []
+        if manual_price is not ...:
+            sets.append("manual_price=?")
+            vals.append(manual_price)
+        if comment is not ...:
+            sets.append("comment=?")
+            vals.append(comment)
+        if not sets:
+            return
+        vals.extend([item_id, supplier_id])
+        conn.execute(
+            f"UPDATE supplier_entries SET {', '.join(sets)} WHERE item_id=? AND supplier_id=?",
+            vals,
+        )
+
+
+def get_result_overrides(item_ids: list[str]) -> dict[tuple[str, str], dict]:
+    """Return {(item_id, supplier_id): {manual_price, comment}} for the
+    given item IDs. Used by the runner to splice overrides into a fresh
+    batch's `state["results"]`."""
+    if not item_ids:
+        return {}
+    placeholders = ",".join("?" * len(item_ids))
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT item_id, supplier_id, manual_price, comment
+                FROM supplier_entries
+                WHERE item_id IN ({placeholders})
+                  AND (manual_price IS NOT NULL OR (comment IS NOT NULL AND comment != ''))""",
+            item_ids,
+        ).fetchall()
+    return {
+        (r["item_id"], r["supplier_id"]): {
+            "manual_price": r["manual_price"],
+            "comment": r["comment"],
+        }
+        for r in rows
+    }
 
 
 # ── Availability / coverage queries ───────────────────────────

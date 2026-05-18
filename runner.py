@@ -36,7 +36,7 @@ load_dotenv()
 
 from core import state, log, save_last_run
 from suppliers import SUPPLIERS as SUPPLIERS_CONFIG
-from item_db import get_item, update_supplier_entry
+from item_db import get_item, update_supplier_entry, get_result_overrides
 from category_routing import get_suppliers_for_item
 
 # How many days before a "not found" result is re-checked.
@@ -89,6 +89,44 @@ def _ua_sort_key(text) -> str:
     if not text:
         return ""
     return str(text).lower().translate(_UA_SORT_FOLD)
+
+
+def _apply_overrides(results: list[dict]) -> list[dict]:
+    """Splice manual_price / comment from supplier_entries into a fresh
+    result list. Each row gets:
+
+      - `comment`       — the free-form note the user attached.
+      - `manual_price`  — the corrected price (kept separately for the UI
+                          so it can flag "manually adjusted").
+      - `price`         — replaced with manual_price when one exists,
+                          original kept in `original_price` for reference.
+      - `total_price`   — recomputed against the effective price × qty.
+    """
+    if not results:
+        return results
+    item_ids = list({r.get("item_id") for r in results if r.get("item_id")})
+    overrides = get_result_overrides(item_ids) if item_ids else {}
+    if not overrides and not any(r.get("comment") or r.get("manual_price") for r in results):
+        return results
+    for r in results:
+        key = (r.get("item_id"), r.get("supplier_id"))
+        ov = overrides.get(key)
+        if not ov:
+            continue
+        if ov.get("comment") is not None:
+            r["comment"] = ov["comment"]
+        mp = ov.get("manual_price")
+        if mp is not None:
+            r["original_price"] = r.get("price")
+            r["manual_price"] = mp
+            r["price"] = mp
+            qty = r.get("qty")
+            try:
+                if qty is not None:
+                    r["total_price"] = round(float(qty) * float(mp), 2)
+            except (TypeError, ValueError):
+                pass
+    return results
 
 
 def _sort_results(results: list[dict]) -> list[dict]:
@@ -275,6 +313,7 @@ def _run_single_item(item_id: str, active_suppliers: list, discovery_mode: bool 
             if result:
                 found_count += 1
                 result["item_id"] = item_id
+                result["supplier_id"] = supplier["id"]
                 # Display the original кошторис label, not the shortened
                 # `search_label` we sent to the supplier — the user wrote
                 # the long name and expects to see it in the results.
@@ -407,7 +446,7 @@ def _run_batch(
         for iid in item_ids:
             run_results.extend(item_states.get(iid, {}).get("results", []))
 
-        state["results"] = _sort_results(run_results)
+        state["results"] = _sort_results(_apply_overrides(run_results))
         state["last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
         stopped_note = " (зупинено)" if state.get("stop_requested") else ""
         log(f"Все готово{stopped_note}. {len(run_results)} цін по {len(item_ids)} матеріалах.")
