@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PriceScout — Моніторинг цін будматеріалів</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body>
+<div class="shell">
+
+  <header>
+    <div class="brand">
+      <div class="brand-mark">PS</div>
+      <div>
+        <div class="brand-name">PriceScout</div>
+        <div class="brand-sub">Моніторинг цін будматеріалів</div>
+      </div>
+    </div>
+    <nav>
+      <button class="nav-btn active" onclick="showPanel('log',this)">Журнал</button>
+      <button class="nav-btn" onclick="showPanel('monitor',this);loadMonitorTab()">Моніторинг</button>
+      <button class="nav-btn" onclick="showPanel('results',this)">Результати<span id="cnt-badge"></span></button>
+      <button class="nav-btn" onclick="showPanel('items',this);loadItemsTab()">База матеріалів</button>
+      <button class="nav-btn" onclick="showPanel('exports',this);loadExports()">Експорти</button>
+      <button class="nav-btn" onclick="showPanel('import',this)">Імпорт кошторису</button>
+      <button class="nav-btn" onclick="showPanel('availability',this);loadAvailability()">Наявність</button>
+      <button class="nav-btn" onclick="showPanel('projects',this);loadProjects()">Проекти</button>
+    </nav>
+    <div class="hdr-right">
+      <div class="hdr-dot" id="hdr-dot"></div>
+      <span class="hdr-status" id="hdr-status">Очікування</span>
+    </div>
+  </header>
+
+  <aside>
+
+    <!-- Search -->
+    <div class="sb-section">
+      <label class="f-label">Назва матеріалу</label>
+      <input class="f-input" type="text" id="cat-input"
+             placeholder="Штукатурка Knauf НР Start 30кг…"
+             oninput="activeItemId = null" autocomplete="off">
+      <div class="f-hint">Вкажіть точну назву — бренд, специфікацію, вагу.</div>
+      <button class="btn-save" onclick="saveItem()">☆ Зберегти матеріал</button>
+    </div>
+
+    <!-- Material library -->
+    <div class="sb-section">
+      <div class="eyebrow">База матеріалів <span id="items-count" style="font-style:normal;letter-spacing:0;color:var(--ink3);font-size:10px;text-transform:none"></span></div>
+      <div class="combo-wrap" id="combo-wrap">
+        <input class="combo-input" type="text" id="combo-input"
+               placeholder="Пошук серед збережених…"
+               oninput="filterItems(this.value)"
+               onfocus="openDropdown()"
+               autocomplete="off">
+        <div class="combo-dropdown" id="combo-dropdown">
+          <div class="combo-empty">Немає збережених матеріалів</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Suppliers -->
+    <div class="sb-section">
+      <div class="eyebrow" style="display:flex;align-items:center;justify-content:space-between;gap:8px">Постачальники<button id="btn-sup-all" onclick="toggleAllSuppliers()" style="font-size:10px;padding:2px 8px;background:transparent;border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--ink3);font-family:var(--sans);white-space:nowrap">Вимкнути всі</button></div>
+      {% for s in suppliers %}
+      <div class="sup-row" id="sup-row-{{ s.id }}">
+        <div class="sup-left">
+          <span class="sup-idx">{{ loop.index }}</span>
+          <span class="sup-name">{{ s.name }}</span>
+          {% if s.enabled %}<span class="sup-badge active" id="sup-badge-{{ s.id }}">активний</span>
+          {% else %}<span class="sup-badge dev">розробка</span>{% endif %}
+          <span class="sup-avail-badge" id="sup-avail-{{ s.id }}" style="display:none;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px"></span>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="chk-{{ s.id }}"
+                 {% if s.enabled %}checked{% endif %}
+                 {% if not s.enabled %}disabled{% endif %}
+                 onchange="renderMonitorTab()">
+          <div class="t-track"></div><div class="t-thumb"></div>
+        </label>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="sb-footer">
+      <button class="run-btn" id="run-btn" onclick="startScrape()">
+        <div class="run-icon">
+          <svg width="7" height="9" viewBox="0 0 7 9" fill="var(--gold)"><path d="M0 0l7 4.5L0 9z"/></svg>
+        </div>
+        Запустити моніторинг
+      </button>
+      <button class="stop-btn" id="stop-btn" onclick="stopScrape()" style="display:none">
+        ◼ Зупинити
+      </button>
+      <div class="last-run-txt" id="last-run"></div>
+    </div>
+
+  </aside>
+
+  <main>
+
+    <!-- Log -->
+    <div class="panel active" id="panel-log">
+      <div>
+        <div class="panel-title">Журнал виконання</div>
+        <div class="panel-sub" id="log-sub">Готовий до запуску</div>
+        <div id="log-item-banner" style="display:none;align-items:center;gap:10px;margin-top:8px;padding:8px 14px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
+          <span style="font-size:11px;color:var(--ink3);text-transform:uppercase;letter-spacing:0.08em;flex-shrink:0">Пошук:</span>
+          <span id="log-item-label" style="font-size:13px;font-weight:600;color:var(--ink)"></span>
+          <span id="log-item-status" style="margin-left:auto;font-size:11px;color:var(--ink3)"></span>
+        </div>
+      </div>
+      <div class="terminal-chrome">
+        <div class="t-bar">
+          <div class="t-dot"></div><div class="t-dot"></div><div class="t-dot"></div>
+          <span class="t-title">pricescout — scraper.log</span>
+        </div>
+        <div class="t-body" id="t-body">
+          <div class="t-idle">
+            <div class="t-idle-mark">PS</div>
+            <div class="t-idle-txt">ОЧІКУВАННЯ КОМАНДИ</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div class="panel" id="panel-results">
+      <div class="r-header">
+        <div><div class="panel-title">Результати моніторингу</div></div>
+        <span class="pill pill-teal" id="badge-total">0 позицій</span>
+        <span class="pill pill-gold" id="badge-label" style="display:none"></span>
+        <span class="pill pill-ink"  id="badge-date">—</span>
+        <div class="r-actions">
+          <a class="btn-excel" href="/api/export/excel" id="excel-btn"
+             style="pointer-events:none;opacity:0.4">↓ Завантажити Excel</a>
+        </div>
+      </div>
+      <div class="tbl-wrap" id="tbl-wrap">
+        <div class="empty-state">
+          <div class="empty-mark">—</div>
+          <div class="empty-h">Результатів немає</div>
+          <div class="empty-p">Введіть назву матеріалу або оберіть зі збережених, та запустіть моніторинг.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Exports -->
+    <div class="panel" id="panel-exports">
+      <div>
+        <div class="panel-title">Історія експортів</div>
+        <div class="panel-sub">Файли зберігаються у папці <code>exports/</code></div>
+      </div>
+      <div id="exports-container"><div class="exports-empty">Завантаження…</div></div>
+    </div>
+
+    <!-- Monitor -->
+    <div class="panel" id="panel-monitor">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="panel-title">Моніторинг</div>
+        <!-- Mode toggle -->
+        <div style="display:flex;background:var(--paper);border:1px solid var(--border);border-radius:var(--r-lg);padding:2px;gap:2px">
+          <button id="mode-single" onclick="setMonitorMode('single')"
+            style="padding:5px 14px;border:none;border-radius:calc(var(--r-lg) - 2px);font-size:11px;font-weight:500;font-family:var(--sans);cursor:pointer;background:var(--gold);color:#fff;transition:all 0.15s">
+            Один матеріал
+          </button>
+          <button id="mode-batch" onclick="setMonitorMode('batch')"
+            style="padding:5px 14px;border:none;border-radius:calc(var(--r-lg) - 2px);font-size:11px;font-weight:500;font-family:var(--sans);cursor:pointer;background:transparent;color:var(--ink3);transition:all 0.15s">
+            Черга
+          </button>
+        </div>
+      </div>
+
+      <!-- Single mode -->
+      <div id="monitor-single">
+        <div id="single-item-banner" style="display:none;align-items:center;gap:10px;padding:10px 16px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);margin-bottom:8px">
+          <span style="font-size:11px;color:var(--ink3);text-transform:uppercase;letter-spacing:0.08em;flex-shrink:0">Пошук:</span>
+          <span id="single-item-label" style="font-size:13px;font-weight:600;color:var(--ink)"></span>
+          <span id="single-item-status" style="margin-left:auto;font-size:11px;color:var(--ink3)"></span>
+        </div>
+        <div id="single-idle-hint" style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:20px;text-align:center;color:var(--ink3);font-size:13px">
+          Використовуйте поле "Назва матеріалу" у лівій панелі та натисніть "Запустити моніторинг".<br>
+          <span style="font-size:11px;margin-top:8px;display:block">Результати з'являться у вкладці Результати.</span>
+        </div>
+      </div>
+
+      <!-- Batch mode -->
+      <div id="monitor-batch" style="display:none;flex:1;flex-direction:column;gap:6px;min-height:0">
+        <!-- Single toolbar row: stats + controls -->
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <div style="display:flex;flex-direction:column;align-items:center;padding:5px 10px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
+              <span id="queue-count" style="font-family:var(--serif);font-size:18px;line-height:1.1">0</span>
+              <span style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">У черзі</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;padding:5px 10px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
+              <span id="queue-done" style="font-family:var(--serif);font-size:18px;line-height:1.1;color:var(--teal)">0</span>
+              <span style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Перевірено</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;padding:5px 10px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
+              <span id="queue-time" style="font-family:var(--serif);font-size:18px;line-height:1.1">—</span>
+              <span style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">≈ хвилин</span>
+            </div>
+          </div>
+          <!-- Batch run controls: how many items + how many to fetch in parallel -->
+          <div id="batch-run-controls" style="display:flex;gap:6px;flex-shrink:0;align-items:stretch">
+            <div style="display:flex;flex-direction:column;gap:2px;padding:5px 10px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);min-width:118px">
+              <span style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">К-сть товарів</span>
+              <div style="display:flex;align-items:center;gap:4px">
+                <select id="batch-count-mode" onchange="onBatchCountModeChange()"
+                        style="flex:1;border:none;background:transparent;font-family:var(--sans);font-size:12px;outline:none;cursor:pointer;padding:0">
+                  <option value="all">Всі</option>
+                  <option value="5">Перші 5</option>
+                  <option value="10">Перші 10</option>
+                  <option value="20">Перші 20</option>
+                  <option value="50">Перші 50</option>
+                  <option value="custom">Інше…</option>
+                </select>
+                <input id="batch-count-custom" type="number" min="1" value="10"
+                       oninput="onBatchCountCustomInput()" onchange="renderMonitorTab()"
+                       style="display:none;width:50px;border:1px solid var(--border);border-radius:var(--r);padding:2px 4px;font-family:var(--mono);font-size:11px;outline:none">
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:2px;padding:5px 10px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);min-width:108px"
+                 title="Скільки товарів парсити одночасно. Кожен товар сам по собі опитує постачальників у 3 потоки.">
+              <span style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Паралельно</span>
+              <select id="batch-parallel" onchange="renderMonitorTab()"
+                      style="border:none;background:transparent;font-family:var(--sans);font-size:12px;outline:none;cursor:pointer;padding:0">
+                <option value="1">1 (послідовно)</option>
+                <option value="2">2 одночасно</option>
+                <option value="3" selected>3 одночасно</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn-sel-all" onclick="clearQueue()" style="flex-shrink:0">✕ Очистити</button>
+          <div style="position:relative;margin-left:auto;flex-shrink:0">
+            <input class="f-input" type="text" id="monitor-search" placeholder="Пошук…" oninput="renderMonitorTab()" style="width:160px;padding-right:22px">
+            <button onclick="document.getElementById('monitor-search').value='';renderMonitorTab()" style="position:absolute;right:5px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--ink3);font-size:14px">×</button>
+          </div>
+          <button id="btn-stop-batch" onclick="stopBatch()" style="display:none;flex-shrink:0;padding:8px 16px;background:#c0392b;color:#fff;border:none;border-radius:var(--r);font-size:12px;font-weight:600;font-family:var(--sans);cursor:pointer;white-space:nowrap">◼ Зупинити</button>
+          <button id="btn-run-batch" onclick="runBatch()" class="run-btn" style="width:auto;padding:9px 18px;flex-shrink:0" disabled>
+            <div class="run-icon"><svg width="7" height="9" viewBox="0 0 7 9" fill="var(--gold)"><path d="M0 0l7 4.5L0 9z"/></svg></div>
+            Запустити чергу
+          </button>
+        </div>
+
+        <!-- Queue + Log side by side when running -->
+        <div style="flex:1;display:flex;gap:12px;min-height:0">
+          <!-- Queue table -->
+          <div style="flex:1;display:flex;flex-direction:column;min-height:0">
+            <div class="import-tbl" style="flex:1">
+              <table>
+                <thead><tr>
+                  <th style="width:28px">#</th>
+                  <th>Назва матеріалу</th>
+                  <th>Категорія</th>
+                  <th style="width:60px"></th>
+                  <th>Ціна</th>
+                  <th>Перевірено</th>
+                  <th style="width:30px"></th>
+                </tr></thead>
+                <tbody id="monitor-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+          <!-- Inline log (shown when batch is running) -->
+          <div id="batch-log-wrap" style="display:none;flex:0 0 380px;flex-direction:column;min-height:0">
+            <div style="font-size:10px;font-weight:500;letter-spacing:0.1em;text-transform:uppercase;color:var(--ink3);margin-bottom:6px">Журнал</div>
+            <div class="terminal-chrome" style="flex:1;display:flex;flex-direction:column;min-height:0">
+              <div class="t-bar">
+                <div class="t-dot"></div><div class="t-dot"></div><div class="t-dot"></div>
+                <span class="t-title">batch.log</span>
+              </div>
+              <div class="t-body" id="batch-log-body" style="flex:1;overflow-y:auto;font-size:10px"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Items DB -->
+    <div class="panel" id="panel-items">
+      <div>
+        <div class="panel-title">База матеріалів</div>
+        <div class="panel-sub">Всі збережені матеріали для моніторингу цін</div>
+      </div>
+
+      <!-- Manual add form -->
+      <div style="display:flex;gap:8px;align-items:center;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:12px 16px">
+        <input class="f-input" type="text" id="manual-add-input" placeholder="Назва матеріалу (бренд, серія, вага)…" style="flex:1" onkeydown="if(event.key==='Enter')addManualItem()">
+        <button onclick="addManualItem()" style="padding:8px 16px;background:var(--gold);color:#fff;border:none;border-radius:var(--r);font-family:var(--sans);font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap">+ Додати вручну</button>
+        <span id="manual-add-msg" style="font-size:12px;color:var(--teal)"></span>
+      </div>
+
+      <!-- Toolbar -->
+      <div style="display:flex;gap:10px;align-items:center">
+        <div style="position:relative;flex:1;max-width:340px">
+          <input class="f-input" type="text" id="items-search" placeholder="Пошук…" oninput="renderItemsTab()" style="padding-right:28px">
+          <button onclick="document.getElementById('items-search').value='';renderItemsTab()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--ink3);font-size:14px;line-height:1">×</button>
+        </div>
+        <select id="items-filter-source" onchange="renderItemsTab()" style="font-size:12px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans)">
+          <option value="">Всі джерела</option>
+          <option value="manual">Додано вручну</option>
+          <option value="kostoris">З кошторису</option>
+        </select>
+        <select id="items-filter-cat" onchange="renderItemsTab()" style="font-size:12px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans)">
+          <option value="">Всі категорії</option>
+        </select>
+        <select id="items-filter-mon" onchange="renderItemsTab()" style="font-size:12px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans)">
+          <option value="">Всі</option>
+          <option value="yes">Моніторяться</option>
+          <option value="no">Без пошуку</option>
+        </select>
+        <span id="items-count" style="font-size:12px;color:var(--ink3);margin-left:auto"></span>
+      </div>
+
+      <!-- Batch actions -->
+      <div id="items-batch-bar" style="display:none;align-items:center;gap:8px;padding:8px 12px;background:var(--teal);border-radius:var(--r-lg);color:#fff">
+        <span id="items-sel-count" style="font-size:12px;font-weight:500"></span>
+        <button onclick="addSelectedToQueue()" style="padding:5px 14px;background:#fff;color:var(--teal);border:none;border-radius:var(--r);font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans)">▶ Додати до черги моніторингу</button>
+        <button onclick="clearItemsSelection()" style="padding:5px 10px;background:transparent;color:rgba(255,255,255,0.7);border:1px solid rgba(255,255,255,0.3);border-radius:var(--r);font-size:11px;cursor:pointer;font-family:var(--sans);margin-left:auto">Зняти вибір</button>
+      </div>
+
+      <!-- Table -->
+      <div style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+        <div class="import-tbl" style="flex:1;overflow-y:auto">
+        <table>
+          <thead><tr>
+            <th style="width:32px"><input type="checkbox" id="items-chk-all" onchange="toggleAllItemsSelection(this.checked)" title="Вибрати всі"></th>
+            <th>Назва матеріалу</th>
+            <th>Категорія</th>
+            <th>Код АВК-5</th>
+            <th>Джерело</th>
+            <th>Статус</th>
+            <th>Ціна</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="items-tbody"></tbody>
+        </table>
+      </div>
+      </div>
+    </div>
+
+    <!-- Import -->
+    <div class="panel" id="panel-import">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div class="panel-title">Імпорт кошторису АВК-5</div>
+          <div class="panel-sub">Завантажте файл Excel (.xls/.xlsx) з АВК-5 — система витягне будівельні матеріали</div>
+        </div>
+
+      </div>
+
+      <!-- Collapsible top section (drop zone + stats only) -->
+      <div id="import-top-section" style="display:flex;flex-direction:column;gap:10px;flex-shrink:0">
+
+      <!-- Drop zone -->
+      <div class="import-drop" id="import-drop"
+           onclick="document.getElementById('import-file').click()"
+           ondragover="event.preventDefault();this.classList.add('over')"
+           ondragleave="this.classList.remove('over')"
+           ondrop="handleDrop(event)">
+        <input type="file" id="import-file" accept=".xls,.xlsx" style="display:none" onchange="parseKostoris(this.files[0])">
+        <div class="import-drop-icon">📄</div>
+        <div class="import-drop-txt">Перетягніть файл або натисніть для вибору</div>
+        <div class="import-drop-sub">.xls або .xlsx — Підсумкова відомість ресурсів АВК-5</div>
+      </div>
+
+      <!-- Stats (hidden until parsed) -->
+      <div id="import-stats-row" style="display:none">
+        <div class="import-stats">
+          <div class="import-stat"><div class="import-stat-val" id="imp-total">0</div><div class="import-stat-lbl">Всього позицій</div></div>
+          <div class="import-stat"><div class="import-stat-val" id="imp-retail" style="color:var(--teal)">0</div><div class="import-stat-lbl">Роздрібні матеріали</div></div>
+          <div class="import-stat"><div class="import-stat-val" id="imp-sel">0</div><div class="import-stat-lbl">Вибрано</div></div>
+        </div>
+      </div>
+      </div>
+
+      <!-- Filter & table — outside collapsible section so it can fill remaining height -->
+      <div id="import-table-wrap" style="display:none;flex:1;flex-direction:column;min-height:0;gap:8px">
+        <!-- filters -->
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div id="category-filters" style="display:flex;flex-wrap:wrap;gap:3px;width:100%;max-height:78px;overflow:hidden"></div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;color:var(--ink3);font-weight:500">Фільтри:</span>
+            <button class="btn-sel-all" onclick="toggleAllFilters(true)">Всі</button>
+            <button class="btn-sel-all" onclick="toggleAllFilters(false)">Жодної</button>
+            <div style="position:relative;margin-left:auto">
+              <input class="f-input" type="text" id="import-search" placeholder="Пошук…" oninput="renderImportTable()" style="width:220px;padding-right:24px">
+              <button onclick="document.getElementById('import-search').value='';renderImportTable()" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--ink3);font-size:14px;line-height:1">×</button>
+            </div>
+          </div>
+        </div>
+        <div style="flex:1;min-height:0;border:1px solid var(--border);border-radius:var(--r-lg);overflow-y:auto;background:var(--white)">
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr>
+              <th style="width:32px;position:sticky;top:0;background:var(--paper);z-index:1"><input type="checkbox" id="chk-all" onchange="selectAll(this.checked)" title="Вибрати/зняти всі"></th>
+              <th style="position:sticky;top:0;background:var(--paper);z-index:1">Назва матеріалу</th>
+              <th style="position:sticky;top:0;background:var(--paper);z-index:1">Шифр</th>
+              <th style="position:sticky;top:0;background:var(--paper);z-index:1">Од.</th>
+              <th style="position:sticky;top:0;background:var(--paper);z-index:1">К-сть</th>
+              <th style="position:sticky;top:0;background:var(--paper);z-index:1">Ціна відпускна</th>
+              <th style="position:sticky;top:0;background:var(--paper);z-index:1"></th>
+            </tr></thead>
+            <tbody id="import-tbody"></tbody>
+          </table>
+        </div>
+        <!-- Sticky import button at panel bottom -->
+        <div style="padding-top:8px;border-top:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;gap:12px">
+          <button class="btn-import" id="btn-do-import" onclick="doImport()" disabled>
+            ↓ Додати вибрані до бази матеріалів
+          </button>
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <span style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Прив'язати до проекту</span>
+            <select id="import-project-select" style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans);min-width:160px">
+              <option value="">— без проекту —</option>
+            </select>
+          </div>
+          <span id="import-result" style="font-size:12px;color:var(--teal)"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Availability -->
+    <div class="panel" id="panel-availability">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div class="panel-title">Наявність на сайтах</div>
+          <div class="panel-sub">Де які товари знайдено — матриця покриття постачальників</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <a class="btn-excel" href="/api/export/price-matrix" style="font-size:11px;padding:6px 14px;text-decoration:none">↓ Прайс-матриця Excel</a>
+          <select id="avail-filter" onchange="renderAvailability()" style="font-size:12px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans)">
+            <option value="">Всі</option>
+            <option value="partial">Часткова наявність</option>
+            <option value="full">Повна наявність</option>
+            <option value="none">Не знайдено</option>
+          </select>
+          <div style="position:relative">
+            <input class="f-input" type="text" id="avail-search" placeholder="Пошук…" oninput="renderAvailability()" style="width:200px;padding-right:22px">
+            <button onclick="document.getElementById('avail-search').value='';renderAvailability()" style="position:absolute;right:5px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--ink3);font-size:14px">×</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Coverage summary cards -->
+      <div id="avail-coverage" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+
+      <!-- Availability matrix table -->
+      <div style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+        <div class="import-tbl" style="flex:1;overflow:auto">
+          <table id="avail-table">
+            <thead id="avail-thead"></thead>
+            <tbody id="avail-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Projects -->
+    <div class="panel" id="panel-projects">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+        <div>
+          <div class="panel-title">Проекти / Кошториси</div>
+          <div class="panel-sub">Групуйте матеріали по проектах — бачте загальну вартість і економію</div>
+        </div>
+        <button onclick="showCreateProject()" style="padding:8px 18px;background:var(--gold);color:#fff;border:none;border-radius:var(--r);font-size:12px;font-weight:500;font-family:var(--sans);cursor:pointer;white-space:nowrap">+ Новий проект</button>
+      </div>
+
+      <!-- Create project form (hidden) -->
+      <div id="project-create-form" style="display:none;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px;flex-shrink:0">
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3);margin-bottom:10px">Новий проект</div>
+        <div style="display:flex;gap:8px;align-items:flex-start">
+          <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+            <input class="f-input" type="text" id="proj-name" placeholder="Назва проекту (напр. ЖК Сонячний, вул. Лісна 12)…" style="flex:1">
+            <input class="f-input" type="text" id="proj-desc" placeholder="Опис (необов'язково)…" style="flex:1">
+          </div>
+          <button onclick="createProject()" style="padding:9px 18px;background:var(--teal);color:#fff;border:none;border-radius:var(--r);font-size:12px;font-weight:500;font-family:var(--sans);cursor:pointer;white-space:nowrap;align-self:center">Створити</button>
+          <button onclick="document.getElementById('project-create-form').style.display='none'" style="padding:9px 10px;background:transparent;color:var(--ink3);border:1px solid var(--border);border-radius:var(--r);font-size:12px;cursor:pointer;align-self:center">✕</button>
+        </div>
+      </div>
+
+      <!-- Projects list or detail view -->
+      <div id="project-list-wrap" style="flex:1;display:flex;flex-direction:column;gap:10px;min-height:0;overflow-y:auto"></div>
+      <div id="project-detail-wrap" style="display:none;flex:1;flex-direction:column;gap:10px;min-height:0"></div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  const SUPPLIER_NAMES = {
+    {% for s in suppliers %}'{{ s.id }}': '{{ s.name }}',{% endfor %}
+  };
+
+</script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
