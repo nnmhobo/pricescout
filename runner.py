@@ -75,6 +75,37 @@ def _clamp_parallel(value, fallback: int = DEFAULT_PARALLEL_ITEMS) -> int:
     return min(MAX_PARALLEL_ITEMS, n)
 
 
+# Ukrainian-friendly sort key: lowercase, fold ґ→г, і→и, ї→и, є→е so the
+# alphabetic order matches what a human reader expects ("Анкер" < "Бетон"
+# < "Грунт", with ґ tied with г instead of landing in the codepoint hole
+# between Я and а). Used to group the run's results by material.
+_UA_SORT_FOLD = str.maketrans({
+    "ґ": "г", "Ґ": "г", "і": "и", "І": "и",
+    "ї": "и", "Ї": "и", "є": "е", "Є": "е",
+})
+
+
+def _ua_sort_key(text) -> str:
+    if not text:
+        return ""
+    return str(text).lower().translate(_UA_SORT_FOLD)
+
+
+def _sort_results(results: list[dict]) -> list[dict]:
+    """Order a flat result list as `item1: [all suppliers], item2: [all], …`.
+
+    Primary key — `item_label` (the material name from the кошторис) so the
+    Results tab and Excel exports show each material with its suppliers
+    grouped together. Secondary key — `supplier` so the rows under a given
+    material are stable across runs (matters when the user compares two
+    Excels side-by-side).
+    """
+    return sorted(
+        results,
+        key=lambda r: (_ua_sort_key(r.get("item_label")), _ua_sort_key(r.get("supplier"))),
+    )
+
+
 def _apply_limit(item_ids: list[str], limit) -> list[str]:
     """Return the first ``limit`` ids, or the full list when limit is
     falsy / out of range."""
@@ -136,7 +167,12 @@ def _run_single_item(item_id: str, active_suppliers: list, discovery_mode: bool 
     if not item:
         return
 
-    label = item.get("search_label") or item["label"]
+    # `search_label` is the query we feed to suppliers (a shortened version
+    # of the кошторис row, e.g. "Ceresit CT 225"). `display_label` is what
+    # the user typed in the кошторис and what they expect to see in the
+    # Results tab / Excel exports — keep them distinct.
+    display_label = item["label"]
+    label = item.get("search_label") or display_label
     istate = item_states[item_id]
     cache_key = (item_id, frozenset(s["id"] for s in active_suppliers))
 
@@ -239,7 +275,10 @@ def _run_single_item(item_id: str, active_suppliers: list, discovery_mode: bool 
             if result:
                 found_count += 1
                 result["item_id"] = item_id
-                result["item_label"] = label
+                # Display the original кошторис label, not the shortened
+                # `search_label` we sent to the supplier — the user wrote
+                # the long name and expects to see it in the results.
+                result["item_label"] = display_label
                 qty = item.get("qty")
                 unit_est = item.get("unit")
                 price = result.get("price")
@@ -358,15 +397,21 @@ def _run_batch(
         # Results are collected after the pool has drained, so a manual
         # stop still captures whatever was found before the queue was
         # cut short.
+        #
+        # Order: group by item (alphabetic by label, UA letters folded onto
+        # their Russian equivalents so "Анкер" sorts before "Бетон" without
+        # surprises from ґ/і/є codepoint positions), and inside each group
+        # by supplier name. Without this, futures completion order would
+        # interleave items unpredictably in the Results tab and Excel.
         run_results: list = []
         for iid in item_ids:
             run_results.extend(item_states.get(iid, {}).get("results", []))
 
-        state["results"] = run_results
+        state["results"] = _sort_results(run_results)
         state["last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
         stopped_note = " (зупинено)" if state.get("stop_requested") else ""
         log(f"Все готово{stopped_note}. {len(run_results)} цін по {len(item_ids)} матеріалах.")
-        save_last_run(run_results, state["label"], state["last_run"])
+        save_last_run(state["results"], state["label"], state["last_run"])
     except Exception as exc:
         state["error"] = str(exc)
         log(f"Критична помилка: {exc}")

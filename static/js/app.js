@@ -317,17 +317,33 @@
       document.getElementById('cnt-badge').textContent = ' (' + items.length + ')';
       const badgeTotal = document.getElementById('badge-total');
       if (badgeTotal) badgeTotal.textContent = items.length + ' постачальників';
-      document.getElementById('tbl-wrap').innerHTML = `
-        <table>
-          <thead><tr>
-            <th>Назва товару</th><th>Ціна за од.</th><th>Од.</th>
-            <th>К-сть</th><th>Од. кошт.</th><th>Загальна</th>
-            <th>Бренд</th><th>Постачальник</th><th>Артикул</th>
-          </tr></thead>
-          <tbody>${items.map(i => `
-            <tr>
+      // Group rendering: backend already orders results by item_label then
+      // supplier. We emit a single sticky-style header row each time the
+      // item_label changes, so the reader sees блоки матеріалів замість
+      // суцільної простиняти. Best price inside the group is highlighted.
+      const groups = new Map();
+      items.forEach(i => {
+        const key = i.item_label || i.name || '—';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(i);
+      });
+      const rows = [];
+      groups.forEach((sups, label) => {
+        const prices = sups.map(s => s.price).filter(p => p != null);
+        const minPrice = prices.length ? Math.min(...prices) : null;
+        rows.push(`<tr class="result-group-header">
+          <td colspan="9" style="background:var(--paper2);font-weight:600;color:var(--ink);padding:8px 12px;font-size:12px;border-top:2px solid var(--border2)">
+            ${esc(label)}
+            <span style="font-size:10px;color:var(--ink3);margin-left:8px;font-weight:400">
+              ${sups.length} ${sups.length === 1 ? 'постачальник' : 'постачальників'}${minPrice != null ? ' · мін. ' + Number(minPrice).toLocaleString('uk-UA') + ' ₴' : ''}
+            </span>
+          </td>
+        </tr>`);
+        sups.forEach(i => {
+          const isBest = minPrice != null && i.price === minPrice;
+          rows.push(`<tr${isBest ? ' style="background:rgba(26,107,90,0.06)"' : ''}>
               <td class="td-name"><a href="${esc(i.url||'#')}" target="_blank" rel="noopener">${esc(i.name||'—')}</a></td>
-              <td class="td-price">${i.price ? Number(i.price).toLocaleString('uk-UA')+'<span class="curr">₴</span>' : '—'}</td>
+              <td class="td-price"${isBest ? ' style="font-weight:600;color:var(--teal)"' : ''}>${i.price ? Number(i.price).toLocaleString('uk-UA')+'<span class="curr">₴</span>' : '—'}</td>
               <td class="td-unit">${esc(i.unit||'—')}</td>
               <td class="td-qty" style="font-family:var(--mono);font-size:11px">${i.qty != null ? Number(i.qty).toLocaleString('uk-UA') : '—'}</td>
               <td class="td-unit-est" style="font-family:var(--mono);font-size:11px;color:var(--ink3)">${esc(i.unit_estimate||'—')}</td>
@@ -335,8 +351,17 @@
               <td class="td-brand">${esc(i.brand||'—')}</td>
               <td class="td-sup">${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener" style="color:var(--ink2);text-decoration:none;border-bottom:1px solid var(--border2)">${esc(i.supplier||'—')}</a>` : `<span>${esc(i.supplier||'—')}</span>`}${i.seller_note ? `<span style="font-size:10px;color:var(--ink3);margin-left:5px;font-family:var(--mono)">${esc(i.seller_note)}</span>` : ''}</td>
               <td class="td-sku">${esc(i.sku||'—')}</td>
-            </tr>`).join('')}
-          </tbody>
+            </tr>`);
+        });
+      });
+      document.getElementById('tbl-wrap').innerHTML = `
+        <table>
+          <thead><tr>
+            <th>Назва товару</th><th>Ціна за од.</th><th>Од.</th>
+            <th>К-сть</th><th>Од. кошт.</th><th>Загальна</th>
+            <th>Бренд</th><th>Постачальник</th><th>Артикул</th>
+          </tr></thead>
+          <tbody>${rows.join('')}</tbody>
         </table>`;
     });
   }

@@ -12,12 +12,14 @@ from core import state, EXPORTS_DIR, ensure_exports_dir
 
 bp = Blueprint("exports", __name__)
 
-COLUMN_ORDER = ["name", "price", "currency", "unit",
+COLUMN_ORDER = ["item_label",
+                "name", "price", "currency", "unit",
                 "qty", "unit_estimate", "total_price",
                 "brand", "sku",
                 "specs", "supplier", "url", "date_scraped"]
 
 COLUMN_NAMES = {
+    "item_label":    "Матеріал кошторису",
     "name":          "Назва товару",
     "price":         "Ціна за од.",
     "currency":      "Валюта",
