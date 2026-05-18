@@ -350,7 +350,7 @@
           ? top3.map((p, i) => `${MEDAL_STYLES[i + 1].medal} ${Number(p).toLocaleString('uk-UA')} ₴`).join(' · ')
           : '';
         rows.push(`<tr class="result-group-header">
-          <td colspan="9" style="background:var(--paper2);font-weight:600;color:var(--ink);padding:8px 12px;font-size:12px;border-top:2px solid var(--border2)">
+          <td colspan="10" style="background:var(--paper2);font-weight:600;color:var(--ink);padding:8px 12px;font-size:12px;border-top:2px solid var(--border2)">
             ${esc(label)}
             <span style="font-size:10px;color:var(--ink3);margin-left:8px;font-weight:400">
               ${sups.length} ${sups.length === 1 ? 'постачальник' : 'постачальників'}${topLine ? ' · ' + topLine : ''}
@@ -361,27 +361,41 @@
           const rank = rankOf(i.price);
           const medal = rank && rank <= 3 ? MEDAL_STYLES[rank] : null;
           const rowStyle = medal ? ` style="background:${medal.bg}"` : '';
-          const priceStyle = medal ? ` style="font-weight:600;color:${medal.text}"` : '';
+          const priceColor = medal ? medal.text : 'inherit';
           const medalBadge = medal ? `<span title="${medal.label}" style="margin-right:6px;font-size:14px">${medal.medal}</span>` : '';
           const itemId = esc(i.item_id || '');
           const supplierId = esc(i.supplier_id || '');
           const canEdit = itemId && supplierId;
-          // Manual-price indicator: italic + tooltip carries the original.
+          // Manual-price indicator: tooltip carries the original.
           const manualMark = i.manual_price != null
-            ? `<span title="${esc('Виправлено вручну. Оригінал: ' + (i.original_price != null ? Number(i.original_price).toLocaleString('uk-UA') + ' ₴' : '—'))}" style="margin-left:4px;font-size:10px;color:var(--ink3);font-style:italic">✎</span>`
+            ? `<span title="${esc('Виправлено вручну. Оригінал: ' + (i.original_price != null ? Number(i.original_price).toLocaleString('uk-UA') + ' ₴' : '—'))}" style="margin-left:4px;font-size:10px;color:var(--ink3)">✎</span>`
             : '';
-          const commentMark = i.comment
-            ? `<span title="${esc(i.comment)}" style="margin-left:6px;font-size:13px">💬</span>`
-            : '';
+          // Inline-editable price: just the digits, currency stays outside
+          // the contenteditable span so the user can't accidentally delete
+          // the ₴ glyph. Blur saves; Enter blurs; Esc reverts.
+          const priceText = i.price != null ? Number(i.price).toLocaleString('uk-UA') : '';
           const priceCell = canEdit
-            ? `<a href="#" onclick="return editResultPrice('${itemId}','${supplierId}',${i.manual_price != null ? Number(i.manual_price) : (i.price != null ? Number(i.price) : 'null')})" style="text-decoration:none;color:inherit;border-bottom:1px dotted var(--border2)" title="Натисніть, щоб виправити ціну">${i.price ? Number(i.price).toLocaleString('uk-UA')+'<span class="curr">₴</span>' : '—'}</a>${manualMark}`
-            : `${i.price ? Number(i.price).toLocaleString('uk-UA')+'<span class="curr">₴</span>' : '—'}${manualMark}`;
-          const commentBtn = canEdit
-            ? `<button onclick="editResultComment('${itemId}','${supplierId}')" style="background:transparent;border:none;cursor:pointer;padding:2px 4px;font-size:13px;color:var(--ink3)" title="${i.comment ? 'Редагувати коментар' : 'Додати коментар'}">${i.comment ? '💬' : '🗨️'}</button>`
-            : commentMark;
+            ? `<span class="cell-edit cell-edit-price"
+                contenteditable="true" spellcheck="false"
+                data-item-id="${itemId}" data-supplier-id="${supplierId}"
+                data-field="price" data-original="${priceText}"
+                style="display:inline-block;min-width:42px;padding:1px 4px;border-radius:3px;border-bottom:1px dashed var(--border2);font-weight:600;color:${priceColor};font-family:var(--mono)"
+                title="Натисніть, щоб виправити ціну (Enter — зберегти, Esc — скасувати)">${priceText || '—'}</span><span class="curr" style="margin-left:2px">${priceText ? '₴' : ''}</span>${manualMark}`
+            : `<span style="font-weight:600;color:${priceColor}">${priceText || '—'}</span><span class="curr">${priceText ? '₴' : ''}</span>${manualMark}`;
+          // Inline-editable comment: empty cell shows muted placeholder
+          // via :empty::before CSS. Same blur/Enter/Esc behaviour as price.
+          const commentText = i.comment ? esc(i.comment) : '';
+          const commentCell = canEdit
+            ? `<span class="cell-edit cell-edit-comment"
+                contenteditable="true" spellcheck="true"
+                data-item-id="${itemId}" data-supplier-id="${supplierId}"
+                data-field="comment" data-original="${commentText}"
+                style="display:block;min-height:18px;padding:2px 6px;border-radius:3px;border-bottom:1px dashed var(--border2);font-size:11px;color:var(--ink)"
+                title="Натисніть, щоб додати/змінити коментар (Enter — зберегти, Esc — скасувати)">${commentText}</span>`
+            : (i.comment ? `<span style="font-size:11px;color:var(--ink2)">${esc(i.comment)}</span>` : '');
           rows.push(`<tr${rowStyle}>
-              <td class="td-name">${medalBadge}<a href="${esc(i.url||'#')}" target="_blank" rel="noopener">${esc(i.name||'—')}</a>${commentMark}</td>
-              <td class="td-price"${priceStyle}>${priceCell}</td>
+              <td class="td-name">${medalBadge}<a href="${esc(i.url||'#')}" target="_blank" rel="noopener">${esc(i.name||'—')}</a></td>
+              <td class="td-price">${priceCell}</td>
               <td class="td-unit">${esc(i.unit||'—')}</td>
               <td class="td-qty" style="font-family:var(--mono);font-size:11px">${i.qty != null ? Number(i.qty).toLocaleString('uk-UA') : '—'}</td>
               <td class="td-unit-est" style="font-family:var(--mono);font-size:11px;color:var(--ink3)">${esc(i.unit_estimate||'—')}</td>
@@ -389,7 +403,7 @@
               <td class="td-brand">${esc(i.brand||'—')}</td>
               <td class="td-sup">${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener" style="color:var(--ink2);text-decoration:none;border-bottom:1px solid var(--border2)">${esc(i.supplier||'—')}</a>` : `<span>${esc(i.supplier||'—')}</span>`}${i.seller_note ? `<span style="font-size:10px;color:var(--ink3);margin-left:5px;font-family:var(--mono)">${esc(i.seller_note)}</span>` : ''}</td>
               <td class="td-sku">${esc(i.sku||'—')}</td>
-              <td class="td-actions" style="text-align:center;width:36px">${commentBtn}</td>
+              <td class="td-comment" style="min-width:140px;max-width:220px">${commentCell}</td>
             </tr>`);
         });
       });
@@ -398,56 +412,76 @@
           <thead><tr>
             <th>Назва товару</th><th>Ціна за од.</th><th>Од.</th>
             <th>К-сть</th><th>Од. кошт.</th><th>Загальна</th>
-            <th>Бренд</th><th>Постачальник</th><th>Артикул</th><th></th>
+            <th>Бренд</th><th>Постачальник</th><th>Артикул</th>
+            <th title="Натисніть, щоб додати коментар">Коментар</th>
           </tr></thead>
           <tbody>${rows.join('')}</tbody>
         </table>`;
+      // Wire inline editors once the table is in the DOM. Using event
+      // delegation would also work, but a small per-render binding keeps
+      // the contract local.
+      document.querySelectorAll('.cell-edit').forEach(_attachCellEditor);
     });
   }
 
-  // ── Result hand-edits ────────────────────────────────────────
-  // Two endpoints user can hit on any result row:
-  //   - editResultPrice — corrects a misparsed unit price (or clears the
-  //     override with an empty input).
-  //   - editResultComment — attaches a free-form note that rides along
-  //     into the Excel export.
-  function editResultPrice(itemId, supplierId, currentPrice) {
-    const current = (currentPrice == null || Number.isNaN(currentPrice)) ? '' : String(currentPrice);
-    const next = window.prompt(
-      'Введіть виправлену ціну в грн.\nПорожньо — відновити автоматичну ціну.',
-      current
-    );
-    if (next === null) return false;  // cancelled
-    const trimmed = next.trim();
-    let payload;
-    if (trimmed === '') {
-      payload = { manual_price: null };
-    } else {
-      const num = Number(trimmed.replace(',', '.'));
-      if (!Number.isFinite(num) || num <= 0) {
-        alert('Невалідна ціна — введіть число більше нуля.');
-        return false;
+  // ── Inline-editable result cells ─────────────────────────────
+  // The price + comment cells in the Results tab are `contenteditable`
+  // spans. Saving is on blur (clicking away) or Enter; Esc reverts to the
+  // value the cell had on render. Validation rejects non-numeric prices.
+  function _attachCellEditor(el) {
+    if (el.dataset.editorBound === '1') return;
+    el.dataset.editorBound = '1';
+    el.addEventListener('focus', () => {
+      // Stash the value at focus time so Esc / equality-check sees the
+      // most recent rendered state (matters after a previous save).
+      el.dataset.original = el.textContent.trim();
+      // Select all so a click-then-type replaces the whole value.
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+    el.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        el.blur();
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault();
+        el.textContent = el.dataset.original || '';
+        el.blur();
       }
-      payload = { manual_price: num };
+    });
+    el.addEventListener('blur', () => _saveCell(el));
+  }
+
+  function _saveCell(el) {
+    const next = el.textContent.trim();
+    const original = (el.dataset.original || '').trim();
+    if (next === original) return;  // no-op
+    const field = el.dataset.field;
+    const itemId = el.dataset.itemId;
+    const supplierId = el.dataset.supplierId;
+
+    let payload;
+    if (field === 'price') {
+      if (next === '' || next === '—') {
+        payload = { manual_price: null };
+      } else {
+        const num = Number(next.replace(/\s/g, '').replace(',', '.'));
+        if (!Number.isFinite(num) || num <= 0) {
+          el.textContent = original;
+          alert('Невалідна ціна — введіть число більше нуля.');
+          return;
+        }
+        payload = { manual_price: num };
+      }
+    } else if (field === 'comment') {
+      payload = { comment: next === '' ? null : next };
+    } else {
+      return;
     }
-    _patchResult(itemId, supplierId, payload);
-    return false;
-  }
 
-  function editResultComment(itemId, supplierId) {
-    const row = (window._currentResults || []).find(r =>
-      String(r.item_id) === String(itemId) && String(r.supplier_id) === String(supplierId)
-    );
-    const current = (row && row.comment) || '';
-    const next = window.prompt(
-      'Коментар до позиції (буде експортований у Excel).\nПорожньо — видалити коментар.',
-      current
-    );
-    if (next === null) return;
-    _patchResult(itemId, supplierId, { comment: next.trim() || null });
-  }
-
-  function _patchResult(itemId, supplierId, payload) {
     fetch(`/api/results/${encodeURIComponent(itemId)}/${encodeURIComponent(supplierId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -455,10 +489,18 @@
     })
       .then(r => r.json())
       .then(d => {
-        if (d.error) { alert(d.error); return; }
-        loadResults();  // re-render with the spliced override
+        if (d.error) {
+          el.textContent = original;
+          alert(d.error);
+          return;
+        }
+        // Re-render so medal ranking / totals update if a price changed.
+        loadResults();
       })
-      .catch(() => alert('Не вдалося оновити рядок.'));
+      .catch(() => {
+        el.textContent = original;
+        alert('Не вдалося оновити рядок.');
+      });
   }
 
   // ── Exports ───────────────────────────────────────────────────
