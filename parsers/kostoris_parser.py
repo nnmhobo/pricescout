@@ -6,7 +6,7 @@
 import re
 import pandas as pd
 from pathlib import Path
-from monitorable import is_monitorable
+from matching.monitorable import is_monitorable
 
 
 CODE_RE = re.compile(r'^[&+]?[СCКк\d][\dА-Яа-яA-Za-z]')

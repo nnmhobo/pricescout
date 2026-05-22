@@ -34,10 +34,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from core import state, log, save_last_run
-from suppliers import SUPPLIERS as SUPPLIERS_CONFIG
-from item_db import get_item, update_supplier_entry, get_result_overrides
-from category_routing import get_suppliers_for_item
+from core.core import state, log, save_last_run
+from core.suppliers import SUPPLIERS as SUPPLIERS_CONFIG
+from core.item_db import get_item, update_supplier_entry, get_result_overrides
+from matching.category_routing import get_suppliers_for_item
 
 # How many days before a "not found" result is re-checked.
 # Suppliers that returned not-found recently are skipped to save time.
@@ -390,6 +390,7 @@ def _run_batch(
     state["stop_requested"] = False
     state["log"] = []
     state["error"] = None
+    state["batch_started_at"] = datetime.now().isoformat()
     state["parallel_items"] = workers
     state["limit"] = len(item_ids)
     state["total_items"] = total_requested

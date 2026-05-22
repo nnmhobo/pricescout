@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 from flask import Blueprint, jsonify, request, send_file
 
-from core import state, EXPORTS_DIR, ensure_exports_dir
+from core.core import state, EXPORTS_DIR, ensure_exports_dir
 
 bp = Blueprint("exports", __name__)
 

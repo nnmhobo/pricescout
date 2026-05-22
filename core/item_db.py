@@ -35,7 +35,7 @@ def _migrate(conn):
     against an existing DB would pointlessly rewrite every row on every
     startup.
     """
-    from monitorable import is_monitorable
+    from matching.monitorable import is_monitorable
     cols = {r[1] for r in conn.execute("PRAGMA table_info(items)").fetchall()}
     monitorable_freshly_added = "monitorable" not in cols
     if monitorable_freshly_added:
@@ -72,7 +72,21 @@ def _migrate(conn):
             description TEXT,
             avk_file    TEXT
         );
+        CREATE TABLE IF NOT EXISTS project_items (
+            project_id  TEXT NOT NULL,
+            item_id     TEXT NOT NULL,
+            added       TEXT NOT NULL,
+            PRIMARY KEY (project_id, item_id)
+        );
     """)
+    # One-time migration: move legacy project_id column values into junction table
+    pi_rows = conn.execute("SELECT COUNT(*) FROM project_items").fetchone()[0]
+    if pi_rows == 0:
+        conn.execute("""
+            INSERT OR IGNORE INTO project_items (project_id, item_id, added)
+            SELECT project_id, id, created FROM items
+            WHERE project_id IS NOT NULL
+        """)
 
     # Price history table
     conn.executescript("""
@@ -232,7 +246,7 @@ def add_item(label: str, source: str = "manual",
              qty: float | None = None, unit: str | None = None,
              estimate_unit_price: float | None = None,
              project_id: str | None = None) -> dict:
-    from monitorable import is_monitorable
+    from matching.monitorable import is_monitorable
     if avk_code:
         existing = get_item_by_code(avk_code)
         if existing:
@@ -265,7 +279,7 @@ def batch_add_items(entries: list, project_id: str | None = None) -> tuple[int, 
       {label, source, avk_code, category, qty, unit, estimate_unit_price}
     Returns (added, skipped) counts.
     """
-    from monitorable import is_monitorable
+    from matching.monitorable import is_monitorable
     added = skipped = 0
     now = datetime.now().strftime("%d.%m.%Y")
 
@@ -305,6 +319,12 @@ def batch_add_items(entries: list, project_id: str | None = None) -> tuple[int, 
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 rows,
             )
+            if project_id:
+                now_iso = datetime.now().isoformat()
+                conn.executemany(
+                    "INSERT OR IGNORE INTO project_items (project_id, item_id, added) VALUES (?, ?, ?)",
+                    [(project_id, r[0], now_iso) for r in rows],
+                )
 
     return added, skipped
 
@@ -482,10 +502,17 @@ def get_projects() -> list[dict]:
         result = []
         for r in rows:
             p = dict(r)
-            cnt = conn.execute(
-                "SELECT COUNT(*) FROM items WHERE project_id=?", (r["id"],)
+            p["item_count"] = conn.execute(
+                "SELECT COUNT(*) FROM project_items WHERE project_id=?", (r["id"],)
             ).fetchone()[0]
-            p["item_count"] = cnt
+            # count items that have at least one found supplier price
+            p["items_with_price"] = conn.execute(
+                """SELECT COUNT(DISTINCT se.item_id)
+                   FROM supplier_entries se
+                   JOIN project_items pi ON pi.item_id = se.item_id
+                   WHERE pi.project_id=? AND se.found=1 AND se.last_price IS NOT NULL""",
+                (r["id"],)
+            ).fetchone()[0]
             result.append(p)
         return result
 
@@ -499,7 +526,7 @@ def get_project(project_id: str) -> dict | None:
             return None
         p = dict(row)
         p["item_count"] = conn.execute(
-            "SELECT COUNT(*) FROM items WHERE project_id=?", (project_id,)
+            "SELECT COUNT(*) FROM project_items WHERE project_id=?", (project_id,)
         ).fetchone()[0]
         return p
 
@@ -519,16 +546,45 @@ def update_project(project_id: str, data: dict):
 
 def delete_project(project_id: str):
     with get_conn() as conn:
-        conn.execute("UPDATE items SET project_id=NULL WHERE project_id=?", (project_id,))
+        conn.execute("DELETE FROM project_items WHERE project_id=?", (project_id,))
         conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
 
 
 def get_project_items(project_id: str) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM items WHERE project_id=? ORDER BY label", (project_id,)
+            """SELECT i.* FROM items i
+               JOIN project_items pi ON pi.item_id = i.id
+               WHERE pi.project_id = ?
+               ORDER BY i.label""",
+            (project_id,)
         ).fetchall()
         return [_row_to_dict(r, _load_suppliers(conn, r["id"])) for r in rows]
+
+
+def add_item_to_project(project_id: str, item_id: str):
+    with get_conn() as conn:
+        conn.execute(
+                "INSERT OR IGNORE INTO project_items (project_id, item_id, added) VALUES (?, ?, ?)",
+            (project_id, item_id, datetime.now().isoformat())
+        )
+
+
+def remove_item_from_project(project_id: str, item_id: str):
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM project_items WHERE project_id=? AND item_id=?",
+            (project_id, item_id)
+        )
+
+
+def get_item_projects(item_id: str) -> list[str]:
+    """Return list of project_ids the item belongs to."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT project_id FROM project_items WHERE item_id=?", (item_id,)
+        ).fetchall()
+        return [r[0] for r in rows]
 
 
 # ── Price history ──────────────────────────────────────────────

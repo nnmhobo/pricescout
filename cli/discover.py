@@ -8,7 +8,7 @@ PriceScout — Discovery Run (автономний скрипт).
 товар не знайдено (runner.SKIP_STALE_DAYS = 30 днів).
 
 Запуск (з директорії проєкту):
-    python discover.py [--limit N] [--workers N] [--suppliers sup1,sup2]
+    python cli/discover.py [--limit N] [--workers N] [--suppliers sup1,sup2]
 
 Аргументи:
     --limit N       обробити лише перші N товарів (для тесту)
@@ -24,13 +24,14 @@ import time
 from pathlib import Path
 
 # Run from the project root so relative paths (pricescout.db, exports/) work.
-os.chdir(Path(__file__).parent)
-sys.path.insert(0, str(Path(__file__).parent))
+_PROJECT_ROOT = Path(__file__).parent.parent
+os.chdir(_PROJECT_ROOT)
+sys.path.insert(0, str(_PROJECT_ROOT))
 
-from item_db import init_db, load_items
-from suppliers import SUPPLIERS
-from core import state
-import runner
+from core.item_db import init_db, load_items
+from core.suppliers import SUPPLIERS
+from core.core import state
+from core import runner
 
 
 def _progress_monitor(total: int, stop_event: threading.Event):

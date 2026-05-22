@@ -13,7 +13,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from routes.exports import _safe_export_path
-from core import EXPORTS_DIR
+from core.core import EXPORTS_DIR
 
 
 def test_returns_path_inside_exports_dir():

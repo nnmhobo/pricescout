@@ -15,7 +15,7 @@ from scrapers._scrapling_base import (
     fetch_html, normalize_search_query, parse_price,
     score_title, _text_of,
 )
-from matcher import find_best_match, DEFAULT_THRESHOLD
+from matching.matcher import find_best_match, DEFAULT_THRESHOLD
 
 DOMAIN = "kub.in.ua"
 # IMPORTANT: KUB uses filter_name, NOT q

@@ -314,11 +314,21 @@
   function loadResults() {
     fetch('/api/results').then(r => r.json()).then(items => {
       if (!items.length) return;
-      // Stash for the comment editor (needs current comment as default).
+      // Stash for the comment editor + search filter.
       window._currentResults = items;
       document.getElementById('cnt-badge').textContent = ' (' + items.length + ')';
       const badgeTotal = document.getElementById('badge-total');
-      if (badgeTotal) badgeTotal.textContent = items.length + ' постачальників';
+      if (badgeTotal) badgeTotal.textContent = items.length + ' результатів';
+      const q = (document.getElementById('results-search') || {}).value || '';
+      renderResults(items, q);
+    });
+  }
+
+  function filterResults(query) {
+    if (window._currentResults) renderResults(window._currentResults, query);
+  }
+
+  function renderResults(items, query) {
       // Group rendering: backend already orders results by item_label then
       // supplier. We emit a single sticky-style header row each time the
       // item_label changes, so the reader sees блоки матеріалів замість
@@ -329,6 +339,21 @@
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(i);
       });
+      // Apply search filter — case-insensitive substring on the group label.
+      const q = (query || '').trim().toLowerCase();
+      // Filter groups by search query
+      if (q) {
+        for (const [label] of [...groups]) {
+          if (!label.toLowerCase().includes(q)) groups.delete(label);
+        }
+      }
+      // Sort each group's suppliers by price ascending (nulls last)
+      groups.forEach(sups => sups.sort((a, b) => {
+        if (a.price == null && b.price == null) return 0;
+        if (a.price == null) return 1;
+        if (b.price == null) return -1;
+        return a.price - b.price;
+      }));
       // Per-group: rank distinct prices (1=cheapest, 2=second, 3=third).
       // Suppliers tied on the same price share the same rank so two stores
       // both at 100 ₴ both get the gold medal. Ranks past 3 get no medal.
@@ -407,8 +432,12 @@
             </tr>`);
         });
       });
-      document.getElementById('tbl-wrap').innerHTML = `
-        <table>
+      const visibleCount = [...groups.values()].reduce((s, g) => s + g.length, 0);
+      const badgeTotal = document.getElementById('badge-total');
+      if (badgeTotal) badgeTotal.textContent = (q ? visibleCount + ' з ' + items.length : items.length) + ' результатів';
+      document.getElementById('tbl-wrap').innerHTML = groups.size === 0
+        ? '<div class="empty-state"><div class="empty-mark">—</div><div class="empty-h">Нічого не знайдено</div><div class="empty-p">Спробуйте інший запит.</div></div>'
+        : `<table>
           <thead><tr>
             <th>Назва товару</th><th>Ціна за од.</th><th>Од.</th>
             <th>К-сть</th><th>Од. кошт.</th><th>Загальна</th>
@@ -421,7 +450,6 @@
       // delegation would also work, but a small per-render binding keeps
       // the contract local.
       document.querySelectorAll('.cell-edit').forEach(_attachCellEditor);
-    });
   }
 
   // ── Inline-editable result cells ─────────────────────────────
@@ -734,7 +762,8 @@
       bar.style.display = 'none';
     }
     const chkAll = document.getElementById('items-chk-all');
-    if (chkAll) chkAll.checked = allItemsData.length > 0 && selectedItemIds.size === allItemsData.length;
+    const _f = getFilteredItems().filter(i => i.monitorable);
+    if (chkAll) chkAll.checked = _f.length > 0 && _f.every(i => selectedItemIds.has(i.id));
   }
 
   function toggleItemSelection(id, checked) {
@@ -743,16 +772,8 @@
   }
 
   function toggleAllItemsSelection(checked) {
-    const search = document.getElementById('items-search').value.trim().toLowerCase();
-    const srcFilter = document.getElementById('items-filter-source').value;
-    const catFilter = document.getElementById('items-filter-cat').value;
-    allItemsData
-      .filter(i => {
-        if (search && !i.label.toLowerCase().includes(search)) return false;
-        if (srcFilter && i.source !== srcFilter) return false;
-        if (catFilter && i.category !== catFilter) return false;
-        return true;
-      })
+    getFilteredItems()
+      .filter(i => i.monitorable)
       .forEach(i => { if (checked) selectedItemIds.add(i.id); else selectedItemIds.delete(i.id); });
     renderItemsTab();
     updateItemsBatchBar();
@@ -779,20 +800,33 @@
     setMonitorMode('batch');
   }
 
-  function renderItemsTab() {
-    const search = document.getElementById('items-search').value.trim().toLowerCase();
-    const srcFilter = document.getElementById('items-filter-source').value;
-    const catFilter = document.getElementById('items-filter-cat').value;
-
-    const monFilter = document.getElementById('items-filter-mon')?.value || '';
-    const filtered = allItemsData.filter(i => {
-      if (search && !i.label.toLowerCase().includes(search)) return false;
-      if (srcFilter && i.source !== srcFilter) return false;
-      if (catFilter && i.category !== catFilter) return false;
+  function getFilteredItems() {
+    const search      = (document.getElementById('items-search')?.value || '').trim().toLowerCase();
+    const srcFilter   = document.getElementById('items-filter-source')?.value || '';
+    const catFilter   = document.getElementById('items-filter-cat')?.value    || '';
+    const monFilter   = document.getElementById('items-filter-mon')?.value    || '';
+    const priceFilter = document.getElementById('items-filter-price')?.value  || '';
+    return allItemsData.filter(i => {
+      if (search      && !i.label.toLowerCase().includes(search)) return false;
+      if (srcFilter   && i.source   !== srcFilter)               return false;
+      if (catFilter   && i.category !== catFilter)               return false;
       if (monFilter === 'yes' && !i.monitorable) return false;
       if (monFilter === 'no'  &&  i.monitorable) return false;
+      const hasPrice = Object.values(i.suppliers || {}).some(s => s.found && s.last_price)
+                       || i.manual_price != null;
+      // "З ціною"  — monitorable items that have a scraped or manual price
+      // "Без ціни" — monitorable items that have been (or should be) searched
+      //              but haven't returned a price yet.
+      //              Non-monitorable items are excluded from both buckets:
+      //              they're priceless by design, not by absence of search.
+      if (priceFilter === 'with'    && !hasPrice) return false;
+      if (priceFilter === 'without' && (hasPrice || !i.monitorable)) return false;
       return true;
     });
+  }
+
+  function renderItemsTab() {
+    const filtered = getFilteredItems();
 
     // Sort: monitorable first, then alphabetical
     filtered.sort((a, b) => {
@@ -1070,8 +1104,10 @@
     renderMonitorTab();
   }
 
-  let batchRunning = false;
-  let batchStopped = false;
+  let batchRunning  = false;
+  let batchStopped  = false;
+  let batchStartTime = 0;
+  let _elapsedTimer  = null;
 
   function stopBatch() {
     batchStopped = true;
@@ -1086,6 +1122,39 @@
     document.getElementById('btn-stop-batch').disabled = true;
   }
 
+
+  function _fmtElapsed(ms) {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    return m > 0 ? m + 'хв ' + (s % 60) + 'с' : s + 'с';
+  }
+
+  function updateBatchProgress(done, total, startedAt) {
+    const bar  = document.getElementById('batch-progress-bar');
+    const txt  = document.getElementById('batch-progress-text');
+    const elEl = document.getElementById('batch-elapsed');
+    if (!bar) return;
+    const pct = (total > 0) ? Math.round((done / total) * 100) : 0;
+    bar.style.width = pct + '%';
+    txt.textContent = total > 0 ? done + ' / ' + total + ' (' + pct + '%)' : '';
+    // elapsed time — prefer server timestamp, fall back to local
+    const base = startedAt ? new Date(startedAt).getTime() : batchStartTime;
+    if (base > 0 && elEl) elEl.textContent = _fmtElapsed(Date.now() - base);
+  }
+
+  function _startElapsedTick(startedAt) {
+    if (_elapsedTimer) clearInterval(_elapsedTimer);
+    _elapsedTimer = setInterval(() => {
+      const elEl = document.getElementById('batch-elapsed');
+      if (!elEl) return;
+      const base = startedAt ? new Date(startedAt).getTime() : batchStartTime;
+      if (base > 0) elEl.textContent = _fmtElapsed(Date.now() - base);
+    }, 1000);
+  }
+
+  function _stopElapsedTick() {
+    if (_elapsedTimer) { clearInterval(_elapsedTimer); _elapsedTimer = null; }
+  }
   async function runBatch() {
     if (!monitorQueue.length) return;
     if (batchRunning) return;
@@ -1094,12 +1163,15 @@
 
     batchRunning = true;
     batchStopped = false;
+    batchStartTime = Date.now();
     document.getElementById('btn-run-batch').disabled = true;
     document.getElementById('btn-stop-batch').style.display = '';
     document.getElementById('btn-stop-batch').disabled = false;
     document.getElementById('btn-stop-batch').textContent = '◼ Зупинити';
     document.getElementById('batch-log-wrap').style.display = 'flex';
     document.getElementById('batch-log-body').innerHTML = '';
+    updateBatchProgress(0, 0, null);
+    _startElapsedTick(null);
     monitorDone = 0;
     monitorQueue.forEach(i => i._done = false);
 
@@ -1163,12 +1235,14 @@
     await new Promise(r => setTimeout(r, 2000));
 
     lastLogLen = 0;
+    let lastTotal = resp.item_count ?? 0;
     while (true) {
       // Incremental fetch: ask only for log lines we haven't seen yet.
       // The backend log grows past 100 lines on big batches, so slicing
       // a capped response client-side used to freeze the log view.
       const s = await fetch('/api/status?log_offset=' + lastLogLen).then(r => r.json());
       appendBatchLog(s.log);
+      if (s.total_items) { lastTotal = s.total_items; updateBatchProgress(s.done_items ?? 0, s.total_items, s.batch_started_at); }
       lastLogLen = s.log_total ?? (lastLogLen + s.log.length);
       if (s.error) { batchLog(`⚠ ${s.error}`); break; }
       if (!s.running) break;
@@ -1180,8 +1254,10 @@
     monitorQueue = monitorQueue.map(q => ({...(updated.find(u => u.id === q.id) || q), _done: true}));
     batchRunning = false;
     batchStopped = false;
+    _stopElapsedTick();
     document.getElementById('btn-run-batch').disabled = false;
     document.getElementById('btn-stop-batch').style.display = 'none';
+    updateBatchProgress(lastTotal, lastTotal, null);
     batchLog('✅ Всі матеріали перевірено!');
     renderMonitorTab();
 
@@ -1201,31 +1277,15 @@
     try {
       const data = await fetch('/api/availability').then(r => r.json());
       availabilityData = data;
-      renderAvailabilityCoverage(data.coverage);
       renderAvailability();
     } catch(e) {
       console.error('loadAvailability error:', e);
     }
   }
 
-  function renderAvailabilityCoverage(coverage) {
-    const el = document.getElementById('avail-coverage');
-    if (!el) return;
-    const supIds = Object.keys(SUPPLIER_NAMES);
-    el.innerHTML = supIds.map(sid => {
-      const c = coverage[sid] || { checked: 0, found: 0 };
-      const pct = c.checked > 0 ? Math.round(c.found / c.checked * 100) : 0;
-      const color = pct >= 70 ? 'var(--teal)' : pct >= 30 ? 'var(--gold)' : 'var(--danger)';
-      return `<div style="display:flex;flex-direction:column;align-items:center;padding:8px 12px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);min-width:90px">
-        <span style="font-family:var(--serif);font-size:20px;line-height:1.1;color:${color}">${pct}%</span>
-        <span style="font-size:10px;font-weight:500;color:var(--ink2);margin-top:2px">${SUPPLIER_NAMES[sid]}</span>
-        <span style="font-size:9px;color:var(--ink3)">${c.found}/${c.checked} знайдено</span>
-      </div>`;
-    }).join('');
-  }
-
   function renderAvailability() {
     const items = availabilityData.items || [];
+    const coverage = availabilityData.coverage || {};
     const supIds = Object.keys(SUPPLIER_NAMES);
     const search = (document.getElementById('avail-search')?.value || '').trim().toLowerCase();
     const filter = document.getElementById('avail-filter')?.value || '';
@@ -1247,12 +1307,28 @@
     const tbody = document.getElementById('avail-tbody');
     if (!thead || !tbody) return;
 
-    thead.innerHTML = `<tr>
-      <th style="position:sticky;top:0;background:var(--paper);z-index:2;min-width:200px">Матеріал</th>
-      <th style="position:sticky;top:0;background:var(--paper);z-index:2;width:100px">Категорія</th>
-      ${supIds.map(sid => `<th style="position:sticky;top:0;background:var(--paper);z-index:2;text-align:center;font-size:10px;min-width:70px;writing-mode:vertical-lr;transform:rotate(180deg);padding:6px 2px">${esc(SUPPLIER_NAMES[sid])}</th>`).join('')}
-      <th style="position:sticky;top:0;background:var(--paper);z-index:2;text-align:center;width:60px">Всього</th>
-    </tr>`;
+    const S = 'position:sticky;background:var(--paper);z-index:2';
+    thead.innerHTML = `
+      <tr>
+        <th style="${S};top:0;min-width:200px;border-bottom:none"></th>
+        <th style="${S};top:0;width:100px;border-bottom:none"></th>
+        ${supIds.map(sid => {
+          const c = coverage[sid] || { checked: 0, found: 0 };
+          const pct = c.checked > 0 ? Math.round(c.found / c.checked * 100) : 0;
+          const col = pct >= 70 ? 'var(--teal)' : pct >= 30 ? 'var(--gold)' : 'var(--danger)';
+          return `<th style="${S};top:0;text-align:center;min-width:70px;padding:5px 2px 3px;border-bottom:none">
+            <span style="font-family:var(--serif);font-size:15px;font-weight:700;color:${col};display:block;line-height:1">${pct}%</span>
+            <span style="font-size:9px;color:var(--ink3);display:block;margin-top:1px">${c.found}/${c.checked}</span>
+          </th>`;
+        }).join('')}
+        <th style="${S};top:0;width:60px;border-bottom:none"></th>
+      </tr>
+      <tr>
+        <th style="${S};top:40px;min-width:200px">Матеріал</th>
+        <th style="${S};top:40px;width:100px">Категорія</th>
+        ${supIds.map(sid => `<th style="${S};top:40px;text-align:center;font-size:10px;min-width:70px;writing-mode:vertical-lr;transform:rotate(180deg);padding:6px 2px">${esc(SUPPLIER_NAMES[sid])}</th>`).join('')}
+        <th style="${S};top:40px;text-align:center;width:60px">Всього</th>
+      </tr>`;
 
     if (!filtered.length) {
       tbody.innerHTML = `<tr><td colspan="${supIds.length + 3}" style="text-align:center;padding:32px;color:var(--ink3);font-size:13px">
@@ -1399,37 +1475,61 @@
       </div>`;
       return;
     }
-    wrap.innerHTML = allProjects.map(p => `
-      <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);cursor:pointer" onclick="viewProject('${p.id}')">
+    wrap.innerHTML = allProjects.map(p => {
+      const pricedPct = p.item_count > 0
+        ? Math.round((p.items_with_price || 0) / p.item_count * 100) : 0;
+      return `
+      <div style="display:flex;align-items:center;gap:14px;padding:16px 18px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);cursor:pointer;transition:box-shadow 0.15s"
+           onmouseenter="this.style.boxShadow='0 2px 12px rgba(0,0,0,0.08)'" onmouseleave="this.style.boxShadow=''"
+           onclick="viewProject('${p.id}')">
+        <div style="width:42px;height:42px;background:var(--teal-light);border-radius:var(--r-lg);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">📋</div>
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600;color:var(--ink)">${esc(p.name)}</div>
-          ${p.description ? `<div style="font-size:11px;color:var(--ink3);margin-top:2px">${esc(p.description)}</div>` : ''}
-          <div style="font-size:10px;color:var(--ink3);margin-top:4px">Створено: ${esc(p.created)} · ${p.item_count} матеріалів</div>
+          ${p.description ? `<div style="font-size:11px;color:var(--ink3);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.description)}</div>` : ''}
+          <div style="display:flex;align-items:center;gap:10px;margin-top:5px">
+            <span style="font-size:10px;color:var(--ink3)">📅 ${esc(p.created)}</span>
+            <span style="font-size:10px;color:var(--ink2);font-weight:500">${p.item_count} матеріалів</span>
+            ${p.item_count > 0 ? `<span style="font-size:10px;color:var(--teal)">${pricedPct}% з цінами</span>` : ''}
+          </div>
         </div>
-        <div style="display:flex;gap:8px;flex-shrink:0">
-          <a href="/api/projects/${esc(p.id)}/export" download style="padding:6px 12px;background:var(--teal-light);color:var(--teal);border:none;border-radius:var(--r);font-size:11px;font-weight:600;cursor:pointer;text-decoration:none;white-space:nowrap">↓ Excel</a>
-          <button onclick="event.stopPropagation();deleteProject('${p.id}')" style="padding:6px 10px;background:transparent;color:var(--ink3);border:1px solid var(--border);border-radius:var(--r);font-size:11px;cursor:pointer">✕</button>
+        <div style="display:flex;gap:8px;flex-shrink:0" onclick="event.stopPropagation()">
+          <a href="/api/projects/${esc(p.id)}/export" download
+             style="padding:6px 12px;background:var(--teal-light);color:var(--teal);border:none;border-radius:var(--r);font-size:11px;font-weight:600;cursor:pointer;text-decoration:none;white-space:nowrap">↓ Excel</a>
+          <button onclick="deleteProject('${p.id}')"
+            style="padding:6px 10px;background:transparent;color:var(--ink3);border:1px solid var(--border);border-radius:var(--r);font-size:11px;cursor:pointer">✕</button>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   }
+
+  // ── Project detail ────────────────────────────────────────────
+
+  let _projItems = [];   // current project's enriched items (for add-item filtering)
+  let _projAddOpen = false;
 
   async function viewProject(projectId) {
     activeProjectId = projectId;
-    const listWrap   = document.getElementById('project-list-wrap');
-    const detailWrap = document.getElementById('project-detail-wrap');
-    listWrap.style.display   = 'none';
-    detailWrap.style.display = 'flex';
+    document.getElementById('project-list-wrap').style.display   = 'none';
+    document.getElementById('project-detail-wrap').style.display = 'flex';
+    await _renderProjectDetail(projectId);
+  }
 
-    // Fetch project + items + summary
+  async function _renderProjectDetail(projectId) {
+    const detailWrap = document.getElementById('project-detail-wrap');
+    detailWrap.innerHTML = `<div style="padding:32px;color:var(--ink3);font-size:13px;text-align:center">Завантаження…</div>`;
+
     const [project, items, summary] = await Promise.all([
       fetch(`/api/projects/${projectId}`).then(r => r.json()),
       fetch(`/api/projects/${projectId}/items`).then(r => r.json()),
       fetch(`/api/projects/${projectId}/summary`).then(r => r.json()),
     ]);
+    _projItems = items;
 
     const fmt = n => n != null ? Number(n).toLocaleString('uk-UA', {maximumFractionDigits:0}) : '—';
+    const inProjectIds = new Set(items.map(i => i.id));
 
     detailWrap.innerHTML = `
+      <!-- Header row -->
       <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
         <button onclick="renderProjectsList();document.getElementById('project-list-wrap').style.display='flex';document.getElementById('project-detail-wrap').style.display='none'"
           style="padding:6px 12px;background:transparent;color:var(--ink3);border:1px solid var(--border);border-radius:var(--r);font-size:11px;cursor:pointer">← Назад</button>
@@ -1437,67 +1537,187 @@
           <div style="font-size:15px;font-weight:600">${esc(project.name)}</div>
           ${project.description ? `<div style="font-size:11px;color:var(--ink3)">${esc(project.description)}</div>` : ''}
         </div>
-        <a href="/api/projects/${esc(projectId)}/export" download style="padding:7px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--r);font-size:12px;font-weight:600;cursor:pointer;text-decoration:none;white-space:nowrap">↓ Експорт Excel</a>
+        <button onclick="_queueProjectItems('${projectId}')"
+          style="padding:7px 14px;background:var(--paper2);color:var(--ink2);border:1px solid var(--border);border-radius:var(--r);font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap">▶ Моніторинг</button>
+        <a href="/api/projects/${esc(projectId)}/export" download
+          style="padding:7px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--r);font-size:12px;font-weight:600;cursor:pointer;text-decoration:none;white-space:nowrap">↓ Excel</a>
       </div>
 
-      <!-- Summary KPIs -->
+      <!-- KPI cards -->
       <div style="display:flex;gap:8px;flex-wrap:wrap;flex-shrink:0">
-        <div style="flex:1;min-width:120px;padding:10px 14px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Матеріалів</div>
+        <div style="flex:1;min-width:110px;padding:10px 14px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
+          <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Матеріалів</div>
           <div style="font-family:var(--serif);font-size:22px;line-height:1.2">${summary.item_count}</div>
           <div style="font-size:10px;color:var(--ink3)">${summary.items_with_price} з цінами</div>
         </div>
-        <div style="flex:1;min-width:120px;padding:10px 14px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Сума кошторис</div>
+        <div style="flex:1;min-width:110px;padding:10px 14px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
+          <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Кошторис</div>
           <div style="font-family:var(--serif);font-size:22px;line-height:1.2">${fmt(summary.total_estimate)}</div>
           <div style="font-size:10px;color:var(--ink3)">грн</div>
         </div>
-        <div style="flex:1;min-width:120px;padding:10px 14px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Сума за мін. цінами</div>
+        <div style="flex:1;min-width:110px;padding:10px 14px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
+          <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Мін. ціни</div>
           <div style="font-family:var(--serif);font-size:22px;line-height:1.2;color:var(--teal)">${fmt(summary.total_best)}</div>
           <div style="font-size:10px;color:var(--ink3)">грн</div>
         </div>
-        <div style="flex:1;min-width:120px;padding:10px 14px;background:${summary.saving>0?'var(--teal-light)':'var(--white)'};border:1px solid var(--border);border-radius:var(--r-lg)">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Економія</div>
+        <div style="flex:1;min-width:110px;padding:10px 14px;background:${summary.saving>0?'var(--teal-light)':'var(--white)'};border:1px solid var(--border);border-radius:var(--r-lg)">
+          <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Економія</div>
           <div style="font-family:var(--serif);font-size:22px;line-height:1.2;color:${summary.saving>0?'var(--teal)':'var(--ink3)'}">${fmt(summary.saving)}</div>
           <div style="font-size:10px;color:var(--ink3)">${summary.saving_pct}%</div>
         </div>
       </div>
 
-      <!-- Items table -->
-      <div style="flex:1;min-height:0;border:1px solid var(--border);border-radius:var(--r-lg);overflow-y:auto;background:var(--white)">
-        <table style="width:100%;border-collapse:collapse">
-          <thead><tr style="position:sticky;top:0;background:var(--paper);z-index:1">
-            <th style="text-align:left;padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;font-weight:600">Матеріал</th>
-            <th style="text-align:center;padding:8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:0.08em">Од.</th>
-            <th style="text-align:right;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:0.08em">К-сть</th>
-            <th style="text-align:right;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:0.08em">Ціна кошт.</th>
-            <th style="text-align:right;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:0.08em">Сума кошт.</th>
-            <th style="text-align:right;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:0.08em">Мін. ціна</th>
-            <th style="text-align:right;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:0.08em">Сума мін.</th>
-            <th style="text-align:center;padding:8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:0.08em">Де знайдено</th>
-            <th style="text-align:center;padding:8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:0.08em">Економія</th>
-          </tr></thead>
-          <tbody>${items.map(item => {
-            const best  = item.best_price;
-            const sup   = item.best_supplier ? (SUPPLIER_NAMES[item.best_supplier] || item.best_supplier) : '';
-            const supUrl = item.suppliers?.[item.best_supplier]?.url || '';
-            const saving = item.saving_pct;
-            const savingColor = saving > 0 ? 'var(--teal)' : saving < 0 ? 'var(--danger)' : 'var(--ink3)';
-            return `<tr style="border-top:1px solid var(--border)">
-              <td style="padding:8px 12px;font-size:12px;font-weight:500;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.label)}">${esc(item.label)}</td>
-              <td style="text-align:center;padding:8px 6px;font-size:11px;color:var(--ink3)">${esc(item.unit||'')}</td>
-              <td style="text-align:right;padding:8px 10px;font-family:var(--mono);font-size:11px">${item.qty != null ? Number(item.qty).toLocaleString('uk-UA') : '—'}</td>
-              <td style="text-align:right;padding:8px 10px;font-family:var(--mono);font-size:11px;color:var(--ink3)">${item.estimate_unit_price != null ? Number(item.estimate_unit_price).toLocaleString('uk-UA') : '—'}</td>
-              <td style="text-align:right;padding:8px 10px;font-family:var(--mono);font-size:12px">${item.total_estimate != null ? Number(item.total_estimate).toLocaleString('uk-UA') : '—'}</td>
-              <td style="text-align:right;padding:8px 10px;font-family:var(--mono);font-size:12px;font-weight:600;color:${best?'var(--teal)':'var(--ink3)'}">${best ? Number(best).toLocaleString('uk-UA') : '—'}</td>
-              <td style="text-align:right;padding:8px 10px;font-family:var(--mono);font-size:12px;font-weight:600;color:var(--teal)">${item.total_best != null ? Number(item.total_best).toLocaleString('uk-UA') : '—'}</td>
-              <td style="text-align:center;padding:8px 6px;font-size:10px">${sup ? (supUrl ? `<a href="${esc(supUrl)}" target="_blank" rel="noopener" style="color:var(--ink2);text-decoration:none;border-bottom:1px solid var(--border)">${esc(sup)}</a>` : esc(sup)) : '—'}</td>
-              <td style="text-align:center;padding:8px 6px;font-size:11px;font-weight:600;color:${savingColor}">${saving != null ? (saving > 0 ? '+' : '') + saving + '%' : '—'}</td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table>
+      <!-- Items table with add-item panel -->
+      <div style="flex:1;min-height:0;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:var(--white)">
+
+        <!-- Table toolbar -->
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--paper)">
+          <span style="font-size:12px;font-weight:500;flex:1">${summary.item_count} матеріалів у проекті</span>
+          <button id="proj-add-btn" onclick="_toggleProjAdd('${projectId}')"
+            style="padding:5px 12px;background:var(--teal);color:#fff;border:none;border-radius:var(--r);font-size:11px;font-weight:600;cursor:pointer">＋ Додати матеріал</button>
+        </div>
+
+        <!-- Add-item search panel (hidden by default) -->
+        <div id="proj-add-panel" style="display:none;padding:10px 12px;border-bottom:1px solid var(--border);background:var(--paper2);flex-shrink:0">
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="proj-add-search" type="text" placeholder="Пошук матеріалу зі бази…"
+              oninput="_renderProjAddResults('${projectId}')"
+              style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r);font-size:12px;font-family:var(--sans);background:var(--white)"
+              autocomplete="off">
+            <button onclick="_toggleProjAdd('${projectId}')"
+              style="padding:5px 10px;background:transparent;color:var(--ink3);border:1px solid var(--border);border-radius:var(--r);font-size:12px;cursor:pointer">✕</button>
+          </div>
+          <div id="proj-add-results" style="margin-top:8px;max-height:180px;overflow-y:auto"></div>
+        </div>
+
+        <!-- Scrollable table -->
+        <div style="flex:1;overflow-y:auto">
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="position:sticky;top:0;background:var(--paper);z-index:1">
+              <th style="text-align:left;padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:0.07em;font-weight:600;white-space:nowrap">Матеріал</th>
+              <th style="text-align:center;padding:8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:0.07em;white-space:nowrap">Од.</th>
+              <th style="text-align:right;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:0.07em;white-space:nowrap">К-сть</th>
+              <th style="text-align:right;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:0.07em;white-space:nowrap">Ціна кошт.</th>
+              <th style="text-align:right;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:0.07em;white-space:nowrap">Сума кошт.</th>
+              <th style="text-align:right;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:0.07em;white-space:nowrap">Мін. ціна</th>
+              <th style="text-align:right;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:0.07em;white-space:nowrap">Сума мін.</th>
+              <th style="text-align:center;padding:8px 8px;font-size:10px;text-transform:uppercase;letter-spacing:0.07em;white-space:nowrap">Де знайдено</th>
+              <th style="text-align:center;padding:8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:0.07em;white-space:nowrap">Економія</th>
+              <th style="width:32px"></th>
+            </tr></thead>
+            <tbody id="proj-items-tbody">${_buildProjItemsRows(items, projectId)}</tbody>
+          </table>
+        </div>
       </div>`;
+  }
+
+  function _buildProjItemsRows(items, projectId) {
+    if (!items.length) {
+      return `<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--ink3);font-size:13px">
+        Немає матеріалів — натисніть "＋ Додати матеріал"
+      </td></tr>`;
+    }
+    return items.map(item => {
+      const best  = item.best_price;
+      const sup   = item.best_supplier ? (SUPPLIER_NAMES[item.best_supplier] || item.best_supplier) : '';
+      const supUrl = item.suppliers?.[item.best_supplier]?.url || '';
+      const saving = item.saving_pct;
+      const savingColor = saving > 0 ? 'var(--teal)' : saving < 0 ? 'var(--danger)' : 'var(--ink3)';
+      return `<tr style="border-top:1px solid var(--border)">
+        <td style="padding:8px 12px;font-size:12px;font-weight:500;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.label)}">${esc(item.label)}</td>
+        <td style="text-align:center;padding:8px 6px;font-size:11px;color:var(--ink3)">${esc(item.unit||'')}</td>
+        <td style="text-align:right;padding:8px 10px;font-family:var(--mono);font-size:11px">${item.qty != null ? Number(item.qty).toLocaleString('uk-UA') : '—'}</td>
+        <td style="text-align:right;padding:8px 10px;font-family:var(--mono);font-size:11px;color:var(--ink3)">${item.estimate_unit_price != null ? Number(item.estimate_unit_price).toLocaleString('uk-UA') : '—'}</td>
+        <td style="text-align:right;padding:8px 10px;font-family:var(--mono);font-size:12px">${item.total_estimate != null ? Number(item.total_estimate).toLocaleString('uk-UA') : '—'}</td>
+        <td style="text-align:right;padding:8px 10px;font-family:var(--mono);font-size:12px;font-weight:600;color:${best?'var(--teal)':'var(--ink3)'}">${best ? Number(best).toLocaleString('uk-UA') : '—'}</td>
+        <td style="text-align:right;padding:8px 10px;font-family:var(--mono);font-size:12px;font-weight:600;color:var(--teal)">${item.total_best != null ? Number(item.total_best).toLocaleString('uk-UA') : '—'}</td>
+        <td style="text-align:center;padding:8px 8px;font-size:10px">${sup ? (supUrl ? `<a href="${esc(supUrl)}" target="_blank" rel="noopener" style="color:var(--ink2);text-decoration:none;border-bottom:1px solid var(--border)">${esc(sup)}</a>` : esc(sup)) : '—'}</td>
+        <td style="text-align:center;padding:8px 6px;font-size:11px;font-weight:600;color:${savingColor}">${saving != null ? (saving > 0 ? '+' : '') + saving + '%' : '—'}</td>
+        <td style="text-align:center;padding:4px">
+          <button onclick="_removeFromProject('${projectId}','${item.id}')"
+            style="padding:3px 7px;background:transparent;color:var(--ink3);border:1px solid var(--border);border-radius:var(--r);font-size:10px;cursor:pointer;opacity:0.6"
+            onmouseenter="this.style.opacity='1';this.style.color='var(--danger)';this.style.borderColor='var(--danger)'"
+            onmouseleave="this.style.opacity='0.6';this.style.color='var(--ink3)';this.style.borderColor='var(--border)'"
+            title="Видалити з проекту">✕</button>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  function _toggleProjAdd(projectId) {
+    const panel = document.getElementById('proj-add-panel');
+    if (!panel) return;
+    _projAddOpen = !_projAddOpen;
+    panel.style.display = _projAddOpen ? 'block' : 'none';
+    if (_projAddOpen) {
+      const inp = document.getElementById('proj-add-search');
+      if (inp) { inp.value = ''; inp.focus(); }
+      _renderProjAddResults(projectId);
+    }
+  }
+
+  function _renderProjAddResults(projectId) {
+    const container = document.getElementById('proj-add-results');
+    if (!container) return;
+    const q = (document.getElementById('proj-add-search')?.value || '').trim().toLowerCase();
+    const inProject = new Set(_projItems.map(i => i.id));
+
+    let candidates = allItemsData.filter(i => i.monitorable);
+    if (q) candidates = candidates.filter(i => i.label.toLowerCase().includes(q));
+    candidates = candidates.slice(0, 40);
+
+    if (!candidates.length) {
+      container.innerHTML = `<div style="font-size:12px;color:var(--ink3);padding:8px 0">Нічого не знайдено</div>`;
+      return;
+    }
+
+    container.innerHTML = candidates.map(item => {
+      const already = inProject.has(item.id);
+      return `<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:var(--r);${already?'opacity:0.45':''}">
+        <span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.label)}">${esc(item.label)}</span>
+        ${item.category ? `<span style="font-size:10px;color:var(--ink3);flex-shrink:0">${esc(item.category)}</span>` : ''}
+        ${already
+          ? `<span style="font-size:10px;color:var(--ink3);padding:3px 8px;border:1px solid var(--border);border-radius:var(--r)">вже є</span>`
+          : `<button onclick="_addToProject('${projectId}','${item.id}',this)"
+               style="padding:3px 10px;background:var(--teal);color:#fff;border:none;border-radius:var(--r);font-size:11px;cursor:pointer;flex-shrink:0">＋</button>`
+        }
+      </div>`;
+    }).join('');
+  }
+
+  async function _addToProject(projectId, itemId, btn) {
+    btn.disabled = true;
+    btn.textContent = '…';
+    await fetch(`/api/projects/${projectId}/items`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ item_id: itemId })
+    });
+    const [items, summary] = await Promise.all([
+      fetch(`/api/projects/${projectId}/items`).then(r => r.json()),
+      fetch(`/api/projects/${projectId}/summary`).then(r => r.json()),
+    ]);
+    _projItems = items;
+    const tbody = document.getElementById('proj-items-tbody');
+    if (tbody) tbody.innerHTML = _buildProjItemsRows(items, projectId);
+    _renderProjAddResults(projectId);
+  }
+
+  async function _removeFromProject(projectId, itemId) {
+    await fetch(`/api/projects/${projectId}/items/${itemId}`, { method: 'DELETE' });
+    const items = await fetch(`/api/projects/${projectId}/items`).then(r => r.json());
+    _projItems = items;
+    const tbody = document.getElementById('proj-items-tbody');
+    if (tbody) tbody.innerHTML = _buildProjItemsRows(items, projectId);
+  }
+
+  function _queueProjectItems(projectId) {
+    const ids = _projItems.filter(i => i.monitorable).map(i => i.id);
+    if (!ids.length) { alert('У проекті немає матеріалів для моніторингу'); return; }
+    ids.forEach(id => selectedItemIds.add(id));
+    updateItemsBatchBar();
+    const logBtn = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Журнал'));
+    showPanel('log', logBtn);
   }
 
   async function deleteProject(id) {
@@ -1529,7 +1749,6 @@
       return;
     }
 
-    // Build simple overlay modal
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9000;display:flex;align-items:center;justify-content:center';
     overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };

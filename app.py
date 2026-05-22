@@ -5,8 +5,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from flask import Flask, render_template
 
-from item_db import init_db
-from suppliers import SUPPLIERS as SUPPLIERS_CONFIG
+from core.item_db import init_db
+from core.suppliers import SUPPLIERS as SUPPLIERS_CONFIG
 from routes.scrape    import bp as scrape_bp
 from routes.items     import bp as items_bp
 from routes.exports   import bp as exports_bp
@@ -49,7 +49,7 @@ def index():
 
 if __name__ == "__main__":
     init_db()
-    from core import ensure_exports_dir, ensure_debug_dir
+    from core.core import ensure_exports_dir, ensure_debug_dir
     ensure_exports_dir()
     ensure_debug_dir()
     port     = int(os.getenv("PORT", 5000))

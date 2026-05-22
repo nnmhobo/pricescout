@@ -1,13 +1,18 @@
-"""PriceScout — shared state, constants, helpers."""
+"""PriceScout -- shared state, constants, helpers."""
 
 import json
 import re
 from datetime import datetime
 from pathlib import Path
 
-EXPORTS_DIR    = Path("exports")
-DEBUG_DIR      = Path("debug")
-LAST_RUN_FILE  = Path("last_run.json")
+EXPORTS_DIR   = Path("exports")
+DEBUG_DIR     = Path("debug")
+DATA_DIR      = Path("data")
+LAST_RUN_FILE = DATA_DIR / "last_run.json"
+
+
+def ensure_data_dir():
+    DATA_DIR.mkdir(exist_ok=True)
 
 
 def ensure_debug_dir():
@@ -18,7 +23,7 @@ def ensure_exports_dir():
     EXPORTS_DIR.mkdir(exist_ok=True)
 
 
-# ── Persist last run results ──────────────────────────────────
+# -- Persist last run results ------------------------------------------
 
 def save_last_run(results: list, label: str, last_run: str):
     try:
@@ -40,9 +45,10 @@ def load_last_run() -> dict:
     return {}
 
 
-# ── In-memory run state ───────────────────────────────────────
+# -- In-memory run state -----------------------------------------------
 
 def _make_state():
+    ensure_data_dir()
     saved = load_last_run()
     return {
         "running":        False,
@@ -67,9 +73,9 @@ def log(msg: str):
     print(entry)
 
 
-# ── Helpers ───────────────────────────────────────────────────
+# -- Helpers -----------------------------------------------------------
 
 def normalize_label(raw: str) -> str:
-    result = re.sub(r'(\d)\s*[*×xX]\s*(\d)', r'\1x\2', raw)
-    result = re.sub(r'(\d)\s*(кг|мм|см|м)\b', r'\1\2', result, flags=re.IGNORECASE)
+    result = re.sub(r'(\d)\s*[*xX]\s*(\d)', r'\1x\2', raw)
+    result = re.sub(r'(\d)\s*(kg|mm|cm|m)\b', r'\1\2', result, flags=re.IGNORECASE)
     return result.strip()

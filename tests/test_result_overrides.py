@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from runner import _apply_overrides
+from core.runner import _apply_overrides
 
 
 def _mk(item_id, supplier_id, price=100, qty=2):
@@ -33,7 +33,7 @@ def _mk(item_id, supplier_id, price=100, qty=2):
 def test_manual_price_replaces_price_and_recomputes_total():
     raw = [_mk("i1", "s1", price=100, qty=2)]
     overrides = {("i1", "s1"): {"manual_price": 80, "comment": None}}
-    with patch("runner.get_result_overrides", return_value=overrides):
+    with patch("core.runner.get_result_overrides", return_value=overrides):
         out = _apply_overrides(raw)
     assert out[0]["price"] == 80
     assert out[0]["manual_price"] == 80
@@ -44,7 +44,7 @@ def test_manual_price_replaces_price_and_recomputes_total():
 def test_comment_only_does_not_touch_price():
     raw = [_mk("i1", "s1", price=100, qty=2)]
     overrides = {("i1", "s1"): {"manual_price": None, "comment": "звірити з постачальником"}}
-    with patch("runner.get_result_overrides", return_value=overrides):
+    with patch("core.runner.get_result_overrides", return_value=overrides):
         out = _apply_overrides(raw)
     assert out[0]["price"] == 100
     assert out[0].get("manual_price") is None
@@ -55,7 +55,7 @@ def test_comment_only_does_not_touch_price():
 
 def test_no_override_passes_results_through():
     raw = [_mk("i1", "s1")]
-    with patch("runner.get_result_overrides", return_value={}):
+    with patch("core.runner.get_result_overrides", return_value={}):
         out = _apply_overrides(raw)
     assert out is raw or out == raw
     assert "manual_price" not in out[0]
@@ -68,7 +68,7 @@ def test_only_matching_keys_are_overridden():
         _mk("i2", "s1", price=200),  # different item — untouched
     ]
     overrides = {("i1", "s1"): {"manual_price": 50, "comment": None}}
-    with patch("runner.get_result_overrides", return_value=overrides):
+    with patch("core.runner.get_result_overrides", return_value=overrides):
         out = _apply_overrides(raw)
     assert out[0]["price"] == 50
     assert out[1]["price"] == 110

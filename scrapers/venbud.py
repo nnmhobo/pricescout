@@ -13,7 +13,7 @@ from urllib.parse import quote_plus
 from scrapers._scrapling_base import (
     normalize_search_query, parse_price, score_title, _text_of, fetch_html,
 )
-from matcher import find_best_match, DEFAULT_THRESHOLD
+from matching.matcher import find_best_match, DEFAULT_THRESHOLD
 
 DOMAIN = "venbud.ua"
 AJAX_URL = "https://venbud.ua/index.php?route=octemplates/module/oct_live_search"

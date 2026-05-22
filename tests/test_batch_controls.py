@@ -15,8 +15,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import pytest
 
-import runner
-from runner import _apply_limit, _clamp_parallel
+from core import runner
+from core.runner import _apply_limit, _clamp_parallel
 
 
 # ── _clamp_parallel ────────────────────────────────────────────

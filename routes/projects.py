@@ -6,9 +6,10 @@ from datetime import datetime
 
 from flask import Blueprint, jsonify, request, send_file
 
-from item_db import (
+from core.item_db import (
     create_project, get_projects, get_project, update_project,
     delete_project, get_project_items,
+    add_item_to_project, remove_item_from_project,
 )
 
 bp = Blueprint("projects", __name__)
@@ -89,6 +90,24 @@ def delete_proj(project_id):
 def project_items_route(project_id):
     items = get_project_items(project_id)
     return jsonify(_enrich_items(items))
+
+
+@bp.route("/api/projects/<project_id>/items", methods=["POST"])
+def add_project_item_route(project_id):
+    if not get_project(project_id):
+        return jsonify({"error": "Проект не знайдено"}), 404
+    data = request.json or {}
+    item_id = (data.get("item_id") or "").strip()
+    if not item_id:
+        return jsonify({"error": "item_id required"}), 400
+    add_item_to_project(project_id, item_id)
+    return jsonify({"status": "added"})
+
+
+@bp.route("/api/projects/<project_id>/items/<item_id>", methods=["DELETE"])
+def remove_project_item_route(project_id, item_id):
+    remove_item_from_project(project_id, item_id)
+    return jsonify({"status": "removed"})
 
 
 @bp.route("/api/projects/<project_id>/summary", methods=["GET"])

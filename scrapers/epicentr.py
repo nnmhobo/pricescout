@@ -27,7 +27,7 @@ from scrapers._scrapling_base import (
     score_title,
     FETCH_MODE_FAST,
 )
-from matcher import DEFAULT_THRESHOLD
+from matching.matcher import DEFAULT_THRESHOLD
 
 # Epicentr is fully server-rendered with schema.org product markup — the
 # fast HTTP fetcher is enough; no need to warm a browser per query.
