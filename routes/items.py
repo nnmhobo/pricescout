@@ -1,8 +1,8 @@
 """Item database routes: /api/items, /api/availability"""
 
 from flask import Blueprint, jsonify, request
-from core import normalize_label
-from item_db import (
+from core.core import normalize_label
+from core.item_db import (
     load_items, add_item, delete_item, get_item, update_item,
     get_supplier_coverage, get_availability_matrix, get_price_history,
 )

@@ -26,7 +26,7 @@ from scrapers._scrapling_base import (
     score_title,
     FETCH_MODE_STEALTH,
 )
-from matcher import DEFAULT_THRESHOLD
+from matching.matcher import DEFAULT_THRESHOLD
 
 # ARS sits behind Cloudflare — we need the stealth (camoufox) path to
 # pass the bot challenge. Fast HTTP gets a 403 here.

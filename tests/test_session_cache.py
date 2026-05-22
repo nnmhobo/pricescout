@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import runner
+from core import runner
 
 
 def _stub_item():
@@ -49,9 +49,9 @@ def test_session_cache_distinguishes_supplier_sets():
     sups_ac = [_fake_supplier("a"), _fake_supplier("c")]
 
     # Prime cache for set {a, b}
-    with patch("runner.get_item", return_value=item), \
-         patch("runner.get_suppliers_for_item", return_value=["a", "b"]), \
-         patch("runner.update_supplier_entry"):
+    with patch("core.runner.get_item", return_value=item), \
+         patch("core.runner.get_suppliers_for_item", return_value=["a", "b"]), \
+         patch("core.runner.update_supplier_entry"):
         runner._run_single_item("x1", sups_ab, discovery_mode=False)
 
     key_ab = ("x1", frozenset({"a", "b"}))
@@ -66,9 +66,9 @@ def test_session_cache_not_populated_in_discovery_mode():
 
     item = _stub_item()
     sups = [_fake_supplier("a")]
-    with patch("runner.get_item", return_value=item), \
-         patch("runner.get_suppliers_for_item", return_value=["a"]), \
-         patch("runner.update_supplier_entry"):
+    with patch("core.runner.get_item", return_value=item), \
+         patch("core.runner.get_suppliers_for_item", return_value=["a"]), \
+         patch("core.runner.update_supplier_entry"):
         runner._run_single_item("x1", sups, discovery_mode=True)
 
     assert not runner._session_cache, "discovery mode must not populate session cache"

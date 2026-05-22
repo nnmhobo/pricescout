@@ -5,12 +5,12 @@ import tempfile
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request
-from item_db import add_item, batch_add_items
-from kostoris_parser import parse as parse_kostoris
+from core.item_db import add_item, batch_add_items
+from parsers.kostoris_parser import parse as parse_kostoris
 
 bp = Blueprint("kostoris", __name__)
 
-LAST_IMPORT_FILE = Path("last_import.json")
+LAST_IMPORT_FILE = Path("data/last_import.json")
 
 
 def save_last_import(data: dict):

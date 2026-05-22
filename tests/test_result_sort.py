@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from runner import _sort_results, _ua_sort_key
+from core.runner import _sort_results, _ua_sort_key
 
 
 def test_groups_items_alphabetically_then_by_supplier():

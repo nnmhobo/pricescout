@@ -1,8 +1,9 @@
 """Scrape routes: /api/scrape, /api/scrape/batch, /api/stop, /api/status, /api/results"""
 
 from flask import Blueprint, jsonify, request
-from core import state, normalize_label
-from runner import (
+from core.core import state, normalize_label
+from core.runner import item_states
+from core.runner import (
     start_scrape,
     start_batch,
     MAX_PARALLEL_ITEMS,
@@ -11,9 +12,9 @@ from runner import (
     _clamp_parallel,
     _apply_limit,
 )
-from item_db import load_items, add_item, set_result_override
-from runner import _apply_overrides, _sort_results
-from suppliers import SUPPLIERS as SUPPLIERS_CONFIG
+from core.item_db import load_items, add_item, set_result_override
+from core.runner import _apply_overrides, _sort_results
+from core.suppliers import SUPPLIERS as SUPPLIERS_CONFIG
 
 bp = Blueprint("scrape", __name__)
 
@@ -95,6 +96,8 @@ def status():
         "parallel_items": state.get("parallel_items"),
         "limit":          state.get("limit"),
         "total_items":    state.get("total_items"),
+        "done_items":     sum(1 for s in item_states.values() if s.get("done")),
+        "batch_started_at": state.get("batch_started_at"),
     })
 
 

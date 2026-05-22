@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import pytest
 
-from matcher import (
+from matching.matcher import (
     calculate_match_score,
     find_best_match,
     normalize_text,

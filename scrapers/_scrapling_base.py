@@ -22,7 +22,7 @@ try:
 except ImportError:  # very old scrapling versions
     _FastFetcher = None
 
-from matcher import (
+from matching.matcher import (
     normalize_text as matcher_normalize,
     calculate_match_score,
     find_best_match,
