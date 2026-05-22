@@ -517,4 +517,11 @@
 </div>
 
 <script>
-  cons
+  const SUPPLIER_NAMES = {
+    {% for s in suppliers %}'{{ s.id }}': '{{ s.name }}',{% endfor %}
+  };
+
+</script>
+<script src="{{ url_for('static', filename='js/app.js') }}?v={{ asset_version }}"></script>
+</body>
+</html>
