@@ -1,9 +1,9 @@
 """Tests for the new batch-run knobs in ``runner``.
 
 Covers:
-- :func:`_clamp_parallel` — input validation for the user-supplied
+- :func:`clamp_parallel` — input validation for the user-supplied
   parallelism setting (1..MAX_PARALLEL_ITEMS).
-- :func:`_apply_limit` — slicing the queue down to the first N ids.
+- :func:`apply_limit` — slicing the queue down to the first N ids.
 """
 
 from __future__ import annotations
@@ -16,10 +16,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import pytest
 
 from core import runner
-from core.runner import _apply_limit, _clamp_parallel
+from core.runner import apply_limit, clamp_parallel
 
 
-# ── _clamp_parallel ────────────────────────────────────────────
+# ── clamp_parallel ────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -31,29 +31,29 @@ from core.runner import _apply_limit, _clamp_parallel
         ("2", 2),
     ],
 )
-def test_clamp_parallel_accepts_valid_values(value, expected):
-    assert _clamp_parallel(value) == expected
+def testclamp_parallel_accepts_valid_values(value, expected):
+    assert clamp_parallel(value) == expected
 
 
-def test_clamp_parallel_caps_at_max(monkeypatch):
+def testclamp_parallel_caps_at_max(monkeypatch):
     monkeypatch.setattr(runner, "MAX_PARALLEL_ITEMS", 5)
-    assert _clamp_parallel(99) == 5
-    assert _clamp_parallel(5) == 5
+    assert clamp_parallel(99) == 5
+    assert clamp_parallel(5) == 5
 
 
-def test_clamp_parallel_falls_back_on_invalid_input():
+def testclamp_parallel_falls_back_on_invalid_input():
     # None / non-numeric / 0 / negative -> fallback default
-    assert _clamp_parallel(None) == runner.DEFAULT_PARALLEL_ITEMS
-    assert _clamp_parallel("abc") == runner.DEFAULT_PARALLEL_ITEMS
-    assert _clamp_parallel(0) == runner.DEFAULT_PARALLEL_ITEMS
-    assert _clamp_parallel(-3) == runner.DEFAULT_PARALLEL_ITEMS
+    assert clamp_parallel(None) == runner.DEFAULT_PARALLEL_ITEMS
+    assert clamp_parallel("abc") == runner.DEFAULT_PARALLEL_ITEMS
+    assert clamp_parallel(0) == runner.DEFAULT_PARALLEL_ITEMS
+    assert clamp_parallel(-3) == runner.DEFAULT_PARALLEL_ITEMS
 
 
-def test_clamp_parallel_custom_fallback():
-    assert _clamp_parallel(None, fallback=2) == min(runner.MAX_PARALLEL_ITEMS, 2)
+def testclamp_parallel_custom_fallback():
+    assert clamp_parallel(None, fallback=2) == min(runner.MAX_PARALLEL_ITEMS, 2)
 
 
-# ── _apply_limit ───────────────────────────────────────────────
+# ── apply_limit ───────────────────────────────────────────────
 
 
 _IDS = ["a", "b", "c", "d", "e"]
@@ -74,16 +74,16 @@ _IDS = ["a", "b", "c", "d", "e"]
         (99,    _IDS),       # bigger -> all
     ],
 )
-def test_apply_limit_slices_queue_head(limit, expected):
-    assert _apply_limit(_IDS, limit) == expected
+def testapply_limit_slices_queue_head(limit, expected):
+    assert apply_limit(_IDS, limit) == expected
 
 
-def test_apply_limit_returns_a_copy():
-    out = _apply_limit(_IDS, None)
+def testapply_limit_returns_a_copy():
+    out = apply_limit(_IDS, None)
     assert out == _IDS
     assert out is not _IDS  # must not be the same list object
 
 
-def test_apply_limit_empty_input():
-    assert _apply_limit([], 5) == []
-    assert _apply_limit([], None) == []
+def testapply_limit_empty_input():
+    assert apply_limit([], 5) == []
+    assert apply_limit([], None) == []

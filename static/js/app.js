@@ -947,27 +947,92 @@
     }).then(() => loadItemsTab());
   }
 
-  function addManualItem() {
-    const input = document.getElementById('manual-add-input');
-    const msg   = document.getElementById('manual-add-msg');
-    const label = input.value.trim();
-    if (!label) return;
+  function openAddItemModal() {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9000;display:flex;align-items:center;justify-content:center';
+    overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:var(--white,#fff);border-radius:12px;padding:28px 28px 24px;width:min(480px,92vw);position:relative;box-shadow:0 8px 32px rgba(0,0,0,0.18)';
+    modal.innerHTML = `
+      <button onclick="this.closest('[style*=fixed]').remove()"
+        style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:20px;cursor:pointer;color:#999;line-height:1">×</button>
+      <div style="font-size:16px;font-weight:700;margin-bottom:20px">Додати матеріал вручну</div>
+
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div>
+          <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:5px">Назва матеріалу <span style="color:var(--danger)">*</span></label>
+          <input id="aim-label" class="f-input" type="text" placeholder="напр. Ceresit CT 85 25 кг" autocomplete="off"
+            style="width:100%;box-sizing:border-box"
+            onkeydown="if(event.key==='Enter')_submitAddItemModal()">
+        </div>
+        <div style="display:flex;gap:12px">
+          <div style="flex:1">
+            <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:5px">Кількість</label>
+            <input id="aim-qty" class="f-input" type="number" min="0" step="any" placeholder="напр. 50"
+              style="width:100%;box-sizing:border-box">
+          </div>
+          <div style="flex:1">
+            <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:5px">Одиниця</label>
+            <input id="aim-unit" class="f-input" type="text" placeholder="напр. шт, м², кг"
+              style="width:100%;box-sizing:border-box">
+          </div>
+        </div>
+        <div id="aim-error" style="font-size:12px;color:var(--danger,#c0392b);min-height:16px"></div>
+      </div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+        <button onclick="this.closest('[style*=fixed]').remove()"
+          style="padding:8px 20px;background:#f0f0f0;border:none;border-radius:var(--r);font-family:var(--sans);font-size:13px;cursor:pointer">
+          Скасувати
+        </button>
+        <button onclick="_submitAddItemModal()"
+          style="padding:8px 22px;background:var(--gold);color:#fff;border:none;border-radius:var(--r);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer">
+          Зберегти
+        </button>
+      </div>`;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    setTimeout(() => modal.querySelector('#aim-label').focus(), 50);
+  }
+
+  function _submitAddItemModal() {
+    const label = (document.getElementById('aim-label')?.value || '').trim();
+    const qty   = document.getElementById('aim-qty')?.value;
+    const unit  = (document.getElementById('aim-unit')?.value || '').trim();
+    const errEl = document.getElementById('aim-error');
+
+    if (!label) {
+      if (errEl) { errEl.textContent = 'Назва не може бути порожньою'; }
+      document.getElementById('aim-label')?.focus();
+      return;
+    }
+
+    const body = { label };
+    if (qty !== '' && qty != null && !isNaN(parseFloat(qty))) body.qty = parseFloat(qty);
+    if (unit) body.unit = unit;
+
+    const btn = document.querySelector('#aim-label')?.closest('[style*=fixed]')
+                  ?.querySelector('button[onclick*=_submitAddItemModal]');
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+
     fetch('/api/items', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ label })
+      body: JSON.stringify(body)
     }).then(r => r.json()).then(d => {
       if (d.error) {
-        msg.style.color = 'var(--danger)';
-        msg.textContent = d.error;
+        if (errEl) errEl.textContent = d.error;
+        if (btn) { btn.disabled = false; btn.textContent = 'Зберегти'; }
       } else {
-        msg.style.color = 'var(--teal)';
-        msg.textContent = '✓ Додано: ' + d.label;
-        input.value = '';
+        document.querySelector('[style*="position:fixed"][style*="z-index:9000"]')?.remove();
         loadItemsTab();
         loadItems();
       }
-      setTimeout(() => msg.textContent = '', 3000);
+    }).catch(() => {
+      if (errEl) errEl.textContent = 'Помилка мережі';
+      if (btn) { btn.disabled = false; btn.textContent = 'Зберегти'; }
     });
   }
 
@@ -1782,70 +1847,4 @@
 
     const supIds = Object.keys(history);
     if (!supIds.length) {
-      alert('Історія цін порожня — запустіть моніторинг декілька разів');
-      return;
-    }
-
-    const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9000;display:flex;align-items:center;justify-content:center';
-    overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
-
-    const modal = document.createElement('div');
-    modal.style.cssText = 'background:var(--white,#fff);border-radius:12px;padding:24px;width:min(680px,90vw);max-height:80vh;overflow-y:auto;position:relative';
-
-    const rows = supIds.map(sid => {
-      const points = history[sid];
-      if (!points || !points.length) return '';
-      const prices = points.map(p => p.price);
-      const minP   = Math.min(...prices);
-      const maxP   = Math.max(...prices);
-      const latest = prices[prices.length - 1];
-      const spark  = sparkline(prices, 160, 36);
-      const supName = SUPPLIER_NAMES[sid] || sid;
-      const trend   = prices.length >= 2 ? prices[prices.length-1] - prices[prices.length-2] : 0;
-      const trendStr = trend > 0 ? `<span style="color:#c0392b">▲${Number(Math.abs(trend)).toLocaleString('uk-UA')}</span>`
-                     : trend < 0 ? `<span style="color:#1a6b5a">▼${Number(Math.abs(trend)).toLocaleString('uk-UA')}</span>`
-                     : '<span style="color:#999">—</span>';
-      return `<div style="display:flex;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid #eee">
-        <div style="min-width:110px;font-size:12px;font-weight:600">${esc(supName)}</div>
-        <div style="flex:0 0 160px">${spark}</div>
-        <div style="font-size:11px;color:#666;min-width:80px">${minP.toLocaleString('uk-UA')} – ${maxP.toLocaleString('uk-UA')} ₴</div>
-        <div style="font-family:monospace;font-size:13px;font-weight:700;min-width:80px">${latest.toLocaleString('uk-UA')} ₴</div>
-        <div style="font-size:11px;min-width:60px">${trendStr}</div>
-        <div style="font-size:10px;color:#999">${points.length} замірів</div>
-      </div>`;
-    }).filter(Boolean).join('');
-
-    modal.innerHTML = `
-      <button onclick="this.closest('[style*=fixed]').remove()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:18px;cursor:pointer;color:#999">×</button>
-      <div style="font-size:15px;font-weight:600;margin-bottom:16px">Історія цін: ${esc(itemLabel)}</div>
-      ${rows || '<div style="color:#999;text-align:center;padding:24px">Немає даних</div>'}`;
-
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-  }
-
-  function sparkline(values, width, height) {
-    if (!values || values.length < 2) {
-      return `<svg width="${width}" height="${height}" style="display:block"><line x1="0" y1="${height/2}" x2="${width}" y2="${height/2}" stroke="#ddd" stroke-width="1.5"/></svg>`;
-    }
-    const mn = Math.min(...values);
-    const mx = Math.max(...values);
-    const range = mx - mn || 1;
-    const pad = 4;
-    const pts = values.map((v, i) => {
-      const x = pad + (i / (values.length - 1)) * (width - pad * 2);
-      const y = height - pad - ((v - mn) / range) * (height - pad * 2);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    }).join(' ');
-    const lastX = parseFloat(pts.split(' ').pop().split(',')[0]);
-    const lastY = parseFloat(pts.split(' ').pop().split(',')[1]);
-    const color = values[values.length-1] <= values[0] ? '#1a6b5a' : '#c0392b';
-    return `<svg width="${width}" height="${height}" style="display:block">
-      <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>
-      <circle cx="${lastX}" cy="${lastY}" r="3" fill="${color}"/>
-    </svg>`;
-  }
-
-  // Load projects on startup (for import select)
-  loadProjects();
+      alert('Історія цін порожня — запус�

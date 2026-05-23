@@ -311,7 +311,7 @@ def add_item(label: str, source: str = "manual",
         if existing:
             raise ValueError(f"Вже існує з кодом {avk_code}: {existing['label']}")
     item_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
-    mon = 1 if is_monitorable(label.strip(), category or "") else 0
+    mon = 1 if is_monitorable(label.strip()) else 0
     with get_conn() as conn:
         try:
             conn.execute(
@@ -734,3 +734,4 @@ def get_price_history_bulk(item_ids: list[str]) -> dict[str, list[dict]]:
             "checked_at": r["checked_at"],
         })
     return result
+                

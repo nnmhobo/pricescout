@@ -483,4 +483,3 @@ def start_batch(
         kwargs={"parallel_items": parallel_items, "limit": limit, "discovery_mode": discovery_mode},
         daemon=True,
     ).start()
-          

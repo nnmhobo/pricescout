@@ -1,4 +1,4 @@
-"""Tests for the run-results ordering in ``runner._sort_results``.
+"""Tests for the run-results ordering in ``runner.sort_results``.
 
 The Results tab and Excel exports group rows by `item_label` (alphabetic,
 Ukrainian-friendly) and within a group by `supplier`. Without a stable
@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from core.runner import _sort_results, _ua_sort_key
+from core.runner import sort_results, _ua_sort_key
 
 
 def test_groups_items_alphabetically_then_by_supplier():
@@ -23,7 +23,7 @@ def test_groups_items_alphabetically_then_by_supplier():
         {"item_label": "Анкер М12",   "supplier": "Епіцентр К", "price": 48},
         {"item_label": "Гіпсокартон", "supplier": "Будія",      "price": 200},
     ]
-    out = _sort_results(raw)
+    out = sort_results(raw)
     labels = [r["item_label"] for r in out]
     # Items grouped (all "Анкер" before all "Гіпсокартон" before all "Цемент")
     assert labels == [
@@ -52,5 +52,5 @@ def test_sort_is_stable_for_missing_fields():
         {"item_label": None, "supplier": None},
         {"item_label": "Бетон", "supplier": "A"},
     ]
-    out = _sort_results(raw)
+    out = sort_results(raw)
     assert out[-1]["item_label"] == "Бетон"
