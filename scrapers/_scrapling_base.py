@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+from collections import OrderedDict
 from functools import lru_cache
 from typing import Iterable, Optional
 
@@ -34,22 +35,28 @@ from matching.matcher import (
 
 # ── Fetching ──────────────────────────────────────────────────
 
-# Simple thread-safe URL cache (TTL-based) to avoid re-fetching the same page
-# within a batch run. This helps when multiple items search the same site.
-_fetch_cache: dict[str, tuple[float, object]] = {}
+# Thread-safe URL cache (TTL-based). OrderedDict preserves insertion order
+# so TTL eviction and the hard cap are both O(1) amortized — no sorting needed.
+_fetch_cache: OrderedDict[str, tuple[float, object]] = OrderedDict()
 _cache_lock = threading.Lock()
 _CACHE_TTL = 300  # seconds — long enough to span a whole batch
 _CACHE_MAX = 500  # hard cap so the cache can't grow without bound
 
-# Per-URL locks prevent multiple threads from launching browsers for the
-# same URL simultaneously (double-checked locking pattern).
+# Per-URL locks prevent multiple threads launching browsers for the same URL
+# simultaneously (double-checked locking). Capped at _URL_LOCKS_MAX entries to
+# avoid unbounded memory growth over very long batch runs.
 _url_locks: dict[str, threading.Lock] = {}
 _url_locks_guard = threading.Lock()
+_URL_LOCKS_MAX = 2000
 
 
 def _get_url_lock(url: str) -> threading.Lock:
     with _url_locks_guard:
         if url not in _url_locks:
+            # Simple purge when the dict gets too large. Safe to do here
+            # because we hold _url_locks_guard and no thread is mid-lookup.
+            if len(_url_locks) >= _URL_LOCKS_MAX:
+                _url_locks.clear()
             _url_locks[url] = threading.Lock()
         return _url_locks[url]
 
@@ -64,18 +71,22 @@ def _cache_get(url: str):
 
 def _cache_set(url: str, result):
     with _cache_lock:
-        _fetch_cache[url] = (time.time(), result)
-        # Evict TTL-expired entries
-        cutoff = time.time() - _CACHE_TTL
-        stale = [k for k, v in _fetch_cache.items() if v[0] < cutoff]
-        for k in stale:
-            del _fetch_cache[k]
-        # Hard cap: drop oldest entries first when we exceed the size budget.
-        if len(_fetch_cache) > _CACHE_MAX:
-            overflow = len(_fetch_cache) - _CACHE_MAX
-            oldest = sorted(_fetch_cache.items(), key=lambda kv: kv[1][0])[:overflow]
-            for k, _ in oldest:
-                _fetch_cache.pop(k, None)
+        now = time.time()
+        _fetch_cache[url] = (now, result)
+        _fetch_cache.move_to_end(url)  # keep insertion-order intact
+
+        # Evict TTL-expired entries from the oldest end — O(k) not O(n log n)
+        cutoff = now - _CACHE_TTL
+        while _fetch_cache:
+            oldest_key, (oldest_ts, _) = next(iter(_fetch_cache.items()))
+            if oldest_ts < cutoff:
+                del _fetch_cache[oldest_key]
+            else:
+                break  # remaining entries are newer
+
+        # Hard cap: drop oldest entries until within budget
+        while len(_fetch_cache) > _CACHE_MAX:
+            _fetch_cache.popitem(last=False)
 
 
 # Fetcher modes:
@@ -905,20 +916,4 @@ def _find_product_url_from_page(page, product_name: str, cfg: SiteConfig) -> Opt
                 continue
             if cfg.domain not in href and not href.startswith("/"):
                 continue
-            link_texts.append(_text_of(link))
-            link_hrefs.append(href)
-
-        if not link_texts:
-            return None
-
-        match = find_best_match(product_name, link_texts, threshold=DEFAULT_THRESHOLD)
-        if match is None:
-            return None
-
-        best_url = link_hrefs[match.index]
-        if best_url.startswith("/"):
-            best_url = f"https://{cfg.domain}{best_url}"
-        return best_url
-    except Exception:
-        pass
-    return None
+            link_texts.appe

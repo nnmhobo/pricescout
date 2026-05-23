@@ -183,8 +183,8 @@ def delete_export(filename):
 @bp.route("/api/export/price-matrix")
 def export_price_matrix():
     """Export all monitored items × all suppliers as a price matrix Excel."""
-    from item_db import get_availability_matrix
-    from suppliers import SUPPLIERS
+    from core.item_db import get_availability_matrix
+    from core.suppliers import SUPPLIERS
     from openpyxl.styles import Font, PatternFill, Alignment
 
     sup_ids   = [s["id"]   for s in SUPPLIERS if s.get("enabled", True)]
@@ -271,5 +271,4 @@ def export_price_matrix():
         output,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         as_attachment=True,
-        download_name=filename,
-    )
+        download_name=filena

@@ -374,7 +374,6 @@ def _run_batch(
     full availability matrix; subsequent normal runs then skip known-absent
     suppliers automatically.
     """
-    global item_states
     # Clear session cache at the start of every batch so a new run always
     # reflects the current state of the DB rather than stale in-memory results.
     _session_cache.clear()
@@ -401,10 +400,11 @@ def _run_batch(
     else:
         state["label"] = f"{'Discovery' if discovery_mode else 'Черга'} ({len(item_ids)} матеріалів)"
 
-    item_states = {
+    item_states.clear()
+    item_states.update({
         iid: {"log": [], "results": [], "done": False, "error": None}
         for iid in item_ids
-    }
+    })
 
     active_suppliers = [
         s for s in SUPPLIERS_CONFIG

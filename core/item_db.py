@@ -11,11 +11,20 @@ from pathlib import Path
 DB_PATH = Path("pricescout.db")
 
 
+# WAL mode is persistent at the SQLite file level — once enabled it stays
+# enabled across reconnects. Track whether we've already set it so we
+# avoid the round-trip PRAGMA on every connection after the first.
+_wal_enabled: bool = False
+
+
 @contextmanager
 def get_conn():
+    global _wal_enabled
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    if not _wal_enabled:
+        conn.execute("PRAGMA journal_mode=WAL")
+        _wal_enabled = True
     conn.execute("PRAGMA foreign_keys=ON")
     try:
         yield conn
@@ -183,22 +192,41 @@ def _load_suppliers(conn, item_id: str) -> dict:
     rows = conn.execute(
         "SELECT * FROM supplier_entries WHERE item_id=?", (item_id,)
     ).fetchall()
-    keys = rows[0].keys() if rows else []
     return {
         r["supplier_id"]: {
             "url":          r["url"],
             "found":        bool(r["found"]),
             "last_checked": r["last_checked"],
             "last_price":   r["last_price"],
-            "manual_price": r["manual_price"] if "manual_price" in keys else None,
-            "comment":      r["comment"]      if "comment"      in keys else None,
+            "manual_price": r["manual_price"],
+            "comment":      r["comment"],
         }
         for r in rows
     }
 
 
+def _build_sup_map(sup_rows) -> dict:
+    """Group a flat list of supplier_entry rows into {item_id: {sup_id: {...}}}.
+
+    Used by batch loaders (load_items, get_availability_matrix, etc.) to
+    avoid N+1 queries: callers fetch all relevant rows in one query and
+    pass them here instead of calling _load_suppliers() per item.
+    """
+    result: dict[str, dict] = {}
+    for r in sup_rows:
+        result.setdefault(r["item_id"], {})[r["supplier_id"]] = {
+            "url":          r["url"],
+            "found":        bool(r["found"]),
+            "last_checked": r["last_checked"],
+            "last_price":   r["last_price"],
+            "manual_price": r["manual_price"],
+            "comment":      r["comment"],
+        }
+    return result
+
+
 def _row_to_dict(row, suppliers: dict) -> dict:
-    keys = row.keys() if hasattr(row, "keys") else []
+    # All columns are guaranteed present after _migrate() runs at startup.
     return {
         "id":                  row["id"],
         "label":               row["label"],
@@ -208,11 +236,11 @@ def _row_to_dict(row, suppliers: dict) -> dict:
         "category":            row["category"],
         "monitorable":         bool(row["monitorable"]) if row["monitorable"] is not None else True,
         "manual_price":        row["manual_price"],
-        "qty":                 row["qty"] if "qty" in keys else None,
-        "unit":                row["unit"] if "unit" in keys else None,
-        "estimate_unit_price": row["estimate_unit_price"] if "estimate_unit_price" in keys else None,
-        "search_label":        row["search_label"] if "search_label" in keys else None,
-        "project_id":          row["project_id"] if "project_id" in keys else None,
+        "qty":                 row["qty"],
+        "unit":                row["unit"],
+        "estimate_unit_price": row["estimate_unit_price"],
+        "search_label":        row["search_label"],
+        "project_id":          row["project_id"],
         "suppliers":           suppliers,
     }
 
@@ -220,7 +248,11 @@ def _row_to_dict(row, suppliers: dict) -> dict:
 def load_items() -> list:
     with get_conn() as conn:
         rows = conn.execute("SELECT * FROM items ORDER BY label").fetchall()
-        return [_row_to_dict(r, _load_suppliers(conn, r["id"])) for r in rows]
+        if not rows:
+            return []
+        sup_rows = conn.execute("SELECT * FROM supplier_entries").fetchall()
+        sup_map = _build_sup_map(sup_rows)
+        return [_row_to_dict(r, sup_map.get(r["id"], {})) for r in rows]
 
 
 def get_item(item_id: str) -> dict | None:
@@ -269,7 +301,24 @@ def add_item(label: str, source: str = "manual",
             )
         except sqlite3.IntegrityError:
             raise ValueError("Такий матеріал вже збережено")
-    return get_item(item_id)
+    # Construct the dict directly — new items have no supplier entries yet,
+    # so a full get_item() round-trip (which JOINs supplier_entries) is wasteful.
+    return {
+        "id":                  item_id,
+        "label":               label.strip(),
+        "created":             datetime.now().strftime("%d.%m.%Y"),
+        "source":              source,
+        "avk_code":            avk_code.strip() if avk_code else None,
+        "category":            category or None,
+        "monitorable":         bool(mon),
+        "manual_price":        None,
+        "qty":                 _coerce("qty", qty),
+        "unit":                _coerce("unit", unit),
+        "estimate_unit_price": _coerce("estimate_unit_price", estimate_unit_price),
+        "search_label":        None,
+        "project_id":          project_id or None,
+        "suppliers":           {},
+    }
 
 
 def batch_add_items(entries: list, project_id: str | None = None) -> tuple[int, int]:
@@ -459,17 +508,24 @@ def get_availability_matrix() -> list[dict]:
             JOIN supplier_entries se ON se.item_id = i.id
             ORDER BY i.label
         """).fetchall()
-        result = []
-        for row in items:
-            sups = _load_suppliers(conn, row["id"])
-            result.append({
+        if not items:
+            return []
+        item_ids = [r["id"] for r in items]
+        ph = ",".join("?" * len(item_ids))
+        sup_rows = conn.execute(
+            f"SELECT * FROM supplier_entries WHERE item_id IN ({ph})", item_ids
+        ).fetchall()
+        sup_map = _build_sup_map(sup_rows)
+        return [
+            {
                 "id":          row["id"],
                 "label":       row["label"],
                 "category":    row["category"],
                 "monitorable": bool(row["monitorable"]) if row["monitorable"] is not None else True,
-                "suppliers":   sups,
-            })
-        return result
+                "suppliers":   sup_map.get(row["id"], {}),
+            }
+            for row in items
+        ]
 
 
 def get_items_for_supplier(supplier_id: str) -> list[str]:
@@ -499,20 +555,38 @@ def create_project(name: str, description: str | None = None,
 def get_projects() -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute("SELECT * FROM projects ORDER BY created DESC").fetchall()
+        if not rows:
+            return []
+        project_ids = [r["id"] for r in rows]
+        ph = ",".join("?" * len(project_ids))
+
+        # Batch-fetch item counts per project (2 queries instead of 2N)
+        counts = {
+            r["project_id"]: r["cnt"]
+            for r in conn.execute(
+                f"SELECT project_id, COUNT(*) AS cnt FROM project_items "
+                f"WHERE project_id IN ({ph}) GROUP BY project_id",
+                project_ids,
+            ).fetchall()
+        }
+        prices = {
+            r["project_id"]: r["cnt"]
+            for r in conn.execute(
+                f"""SELECT pi.project_id, COUNT(DISTINCT se.item_id) AS cnt
+                    FROM supplier_entries se
+                    JOIN project_items pi ON pi.item_id = se.item_id
+                    WHERE pi.project_id IN ({ph})
+                      AND se.found=1 AND se.last_price IS NOT NULL
+                    GROUP BY pi.project_id""",
+                project_ids,
+            ).fetchall()
+        }
+
         result = []
         for r in rows:
             p = dict(r)
-            p["item_count"] = conn.execute(
-                "SELECT COUNT(*) FROM project_items WHERE project_id=?", (r["id"],)
-            ).fetchone()[0]
-            # count items that have at least one found supplier price
-            p["items_with_price"] = conn.execute(
-                """SELECT COUNT(DISTINCT se.item_id)
-                   FROM supplier_entries se
-                   JOIN project_items pi ON pi.item_id = se.item_id
-                   WHERE pi.project_id=? AND se.found=1 AND se.last_price IS NOT NULL""",
-                (r["id"],)
-            ).fetchone()[0]
+            p["item_count"]      = counts.get(r["id"], 0)
+            p["items_with_price"] = prices.get(r["id"], 0)
             result.append(p)
         return result
 
@@ -554,74 +628,4 @@ def get_project_items(project_id: str) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
             """SELECT i.* FROM items i
-               JOIN project_items pi ON pi.item_id = i.id
-               WHERE pi.project_id = ?
-               ORDER BY i.label""",
-            (project_id,)
-        ).fetchall()
-        return [_row_to_dict(r, _load_suppliers(conn, r["id"])) for r in rows]
-
-
-def add_item_to_project(project_id: str, item_id: str):
-    with get_conn() as conn:
-        conn.execute(
-                "INSERT OR IGNORE INTO project_items (project_id, item_id, added) VALUES (?, ?, ?)",
-            (project_id, item_id, datetime.now().isoformat())
-        )
-
-
-def remove_item_from_project(project_id: str, item_id: str):
-    with get_conn() as conn:
-        conn.execute(
-            "DELETE FROM project_items WHERE project_id=? AND item_id=?",
-            (project_id, item_id)
-        )
-
-
-def get_item_projects(item_id: str) -> list[str]:
-    """Return list of project_ids the item belongs to."""
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT project_id FROM project_items WHERE item_id=?", (item_id,)
-        ).fetchall()
-        return [r[0] for r in rows]
-
-
-# ── Price history ──────────────────────────────────────────────
-
-def get_price_history(item_id: str, supplier_id: str | None = None) -> list[dict]:
-    with get_conn() as conn:
-        if supplier_id:
-            rows = conn.execute(
-                """SELECT supplier_id, price, checked_at FROM price_history
-                   WHERE item_id=? AND supplier_id=? ORDER BY checked_at""",
-                (item_id, supplier_id)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """SELECT supplier_id, price, checked_at FROM price_history
-                   WHERE item_id=? ORDER BY checked_at""",
-                (item_id,)
-            ).fetchall()
-        return [dict(r) for r in rows]
-
-
-def get_price_history_bulk(item_ids: list[str]) -> dict[str, list[dict]]:
-    """Return price history grouped by item_id for multiple items at once."""
-    if not item_ids:
-        return {}
-    placeholders = ",".join("?" * len(item_ids))
-    with get_conn() as conn:
-        rows = conn.execute(
-            f"""SELECT item_id, supplier_id, price, checked_at FROM price_history
-                WHERE item_id IN ({placeholders}) ORDER BY item_id, checked_at""",
-            item_ids
-        ).fetchall()
-    result: dict[str, list[dict]] = {}
-    for r in rows:
-        result.setdefault(r["item_id"], []).append({
-            "supplier_id": r["supplier_id"],
-            "price": r["price"],
-            "checked_at": r["checked_at"],
-        })
-    return result
+               JOIN project_items pi ON pi.
