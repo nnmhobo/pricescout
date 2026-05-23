@@ -948,7 +948,8 @@
   }
 
   function addManualItem() {
-    const input = document.getElementById('items-search');
+    const input = document.getElementById('manual-add-input');
+    const msg   = document.getElementById('manual-add-msg');
     const label = (input ? input.value : '').trim();
     if (!label) { if (input) input.focus(); return; }
     fetch('/api/items', {
@@ -957,12 +958,13 @@
       body: JSON.stringify({ label })
     }).then(r => r.json()).then(d => {
       if (d.error) {
-        alert(d.error);
+        if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = d.error; }
       } else {
-        if (input) input.value = '';
-        renderItemsTab();
+        if (msg) { msg.style.color = 'var(--teal)'; msg.textContent = '✓ Додано: ' + d.label; }
+        if (input) input.value = ''; 
         loadItemsTab();
         loadItems();
+        setTimeout(() => { if (msg) msg.textContent = ''; }, 3000);
       }
     });
   }
