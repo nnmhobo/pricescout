@@ -135,8 +135,8 @@
     .t-bar { display:flex; align-items:center; gap:6px; padding:10px 14px; background:rgba(255,255,255,0.03); border-bottom:1px solid rgba(255,255,255,0.05); flex-shrink:0; }
     .t-dot { width:10px; height:10px; border-radius:50%; }
     .t-dot:nth-child(1){background:#ff5f5760} .t-dot:nth-child(2){background:#febc2e60} .t-dot:nth-child(3){background:#28c84060}
-    .t-title { margin:0 auto; font-family:var(--mono); font-size:10px; color:rgba(255,255,255,0.2); letter-spacing:0.08em; }
-    .t-body { flex:1; overflow-y:auto; padding:14px 18px; font-family:var(--mono); font-size:12px; line-height:1.9; color:rgba(255,255,255,0.45); min-height:200px; }
+    .t-title { flex:1; text-align:center; font-family:var(--mono); font-size:10px; color:rgba(255,255,255,0.2); letter-spacing:0.08em; }
+    .t-body { flex:1; overflow-y:auto; overflow-x:hidden; padding:14px 18px; font-family:var(--mono); font-size:12px; line-height:1.9; color:rgba(255,255,255,0.45); min-height:0; white-space:pre-wrap; word-break:break-all; }
     .t-body::-webkit-scrollbar { width:3px; }
     .t-body::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.08); }
     .log-line { display:flex; gap:14px; }
@@ -244,3 +244,51 @@
     #avail-table td { padding:5px 8px; border-bottom:1px solid var(--border); }
     #avail-table tr:hover { background:rgba(26,107,90,0.03); }
     #avail-coverage { margin:8px 0 12px; }
+
+    /* ── Dark mode ──────────────────────────────────────────────── */
+    [data-theme="dark"] {
+      --ink:         #cdd5e0;
+      --ink2:        #a8b4c8;
+      --ink3:        #5e6e87;
+      --paper:       #0d1117;
+      --paper2:      #141b27;
+      --white:       #192132;
+      --gold:        #c8a050;
+      --gold-light:  #dcb96a;
+      --gold-bg:     #1c1509;
+      --gold-border: #352610;
+      --teal:        #2ec4a0;
+      --teal-light:  #0b2620;
+      --danger:      #f07070;
+      --danger-bg:   #270a0a;
+      --border:      #232e42;
+      --border2:     #2c3a54;
+      --shadow-sm:   0 1px 3px rgba(0,0,0,0.5);
+      --shadow:      0 4px 16px rgba(0,0,0,0.55), 0 1px 4px rgba(0,0,0,0.3);
+      --shadow-lg:   0 8px 32px rgba(0,0,0,0.65);
+    }
+    /* Elements that use --ink as a background (not text) need explicit dark overrides */
+    [data-theme="dark"] header            { background: #080c14; }
+    [data-theme="dark"] .run-btn          { background: #1f2a3e; color: #dde4f0; }
+    [data-theme="dark"] .run-btn:hover:not(:disabled) { background: #28354e; }
+    [data-theme="dark"] .terminal-chrome  { background: #080c14; }
+    [data-theme="dark"] .t-bar            { background: rgba(255,255,255,0.02); }
+    /* Sticky table headers need an explicit bg so they don't become transparent */
+    [data-theme="dark"] thead th,
+    [data-theme="dark"] .import-tbl thead th { background: var(--paper2); }
+    /* Select controls */
+    [data-theme="dark"] select { color: var(--ink); }
+    /* Scrollbar in dark mode */
+    [data-theme="dark"] .t-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); }
+    [data-theme="dark"] .combo-dropdown::-webkit-scrollbar-thumb { background: var(--border2); }
+    /* Code/inline tags */
+    [data-theme="dark"] code { background: var(--paper2); color: var(--ink2); padding: 1px 4px; border-radius: 3px; }
+    /* Import drop zone */
+    [data-theme="dark"] .import-drop { background: var(--white); }
+    /* Availability dots */
+    [data-theme="dark"] .avail-found    { background: var(--teal-light);  color: var(--teal); }
+    [data-theme="dark"] .avail-missing  { background: var(--danger-bg);   color: var(--danger); }
+    [data-theme="dark"] .avail-unchecked{ background: var(--paper2);      color: var(--ink3); }
+    /* theme toggle button keeps consistent look against the dark header */
+    [data-theme="dark"] #theme-toggle { color: rgba(255,255,255,0.4) !important; }
+    [data-theme="dark"] #theme-toggle:hover { color: rgba(255,255,255,0.75) !important; }

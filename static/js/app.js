@@ -1,3 +1,20 @@
+// ── Theme ────────────────────────────────────────────────────
+  function initTheme() {
+    const saved = localStorage.getItem('theme') || 'light';
+    document.documentElement.setAttribute('data-theme', saved);
+    const btn = document.getElementById('theme-toggle');
+    if (btn) btn.textContent = saved === 'dark' ? '☀️' : '🌙';
+  }
+
+  function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') || 'light';
+    const next = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+    const btn = document.getElementById('theme-toggle');
+    if (btn) btn.textContent = next === 'dark' ? '☀️' : '🌙';
+  }
+
 // ── State ────────────────────────────────────────────────────
   let allItems  = [];
   let activeItemId = null;
@@ -149,6 +166,7 @@
     if (document.getElementById('queue-count')) renderMonitorTab();
   }
 
+  initTheme();
   loadItems();
 
   // Fetch the server's parallelism caps and rebuild the "Паралельно" select
@@ -1109,6 +1127,18 @@
   let batchStartTime = 0;
   let _elapsedTimer  = null;
 
+  function clearBatchLog() {
+    const logEl = document.getElementById('batch-log-body');
+    if (logEl) logEl.innerHTML = '';
+    const scrollBtn = document.getElementById('log-scroll-btn');
+    if (scrollBtn) scrollBtn.style.display = 'none';
+  }
+
+  function scrollBatchLogToBottom() {
+    const logEl = document.getElementById('batch-log-body');
+    if (logEl) logEl.scrollTop = logEl.scrollHeight;
+  }
+
   function stopBatch() {
     batchStopped = true;
     fetch('/api/stop', { method: 'POST' }).then(() => {
@@ -1176,6 +1206,12 @@
     monitorQueue.forEach(i => i._done = false);
 
     const logEl = document.getElementById('batch-log-body');
+    const scrollBtn = document.getElementById('log-scroll-btn');
+    // Show ↓ button when user scrolls up; hide when near bottom.
+    logEl.addEventListener('scroll', () => {
+      const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+      if (scrollBtn) scrollBtn.style.display = atBottom ? 'none' : '';
+    });
     // Cap how many log <div>s live in the DOM at once. A full 603-item
     // batch emits tens of thousands of lines; keeping them all (plus a
     // forced reflow per line) freezes the page. Old lines scroll off the
@@ -1187,6 +1223,7 @@
       // A single poll can return more lines than we'd ever keep on screen —
       // only the tail is worth rendering.
       if (lines.length > MAX_LOG_LINES) lines = lines.slice(-MAX_LOG_LINES);
+      const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
       const frag = document.createDocumentFragment();
       for (const msg of lines) {
         const div = document.createElement('div');
@@ -1199,8 +1236,8 @@
       while (logEl.childElementCount > MAX_LOG_LINES) {
         logEl.removeChild(logEl.firstChild);
       }
-      // One reflow per batch instead of one per line.
-      logEl.scrollTop = logEl.scrollHeight;
+      // Only auto-scroll if user was already at the bottom.
+      if (atBottom) logEl.scrollTop = logEl.scrollHeight;
     }
     function batchLog(msg) { appendBatchLog([msg]); }
 
@@ -1242,7 +1279,7 @@
       // a capped response client-side used to freeze the log view.
       const s = await fetch('/api/status?log_offset=' + lastLogLen).then(r => r.json());
       appendBatchLog(s.log);
-      if (s.total_items) { lastTotal = s.total_items; updateBatchProgress(s.done_items ?? 0, s.total_items, s.batch_started_at); }
+      if (s.total_items) { lastTotal = s.total_items; updateBatchProgress(s.found_items ?? 0, s.total_items, s.batch_started_at); }
       lastLogLen = s.log_total ?? (lastLogLen + s.log.length);
       if (s.error) { batchLog(`⚠ ${s.error}`); break; }
       if (!s.running) break;
