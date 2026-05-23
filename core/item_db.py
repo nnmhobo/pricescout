@@ -734,4 +734,3 @@ def get_price_history_bulk(item_ids: list[str]) -> dict[str, list[dict]]:
             "checked_at": r["checked_at"],
         })
     return result
-                

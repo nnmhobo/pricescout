@@ -321,10 +321,10 @@
       <!-- Search + add button on one row -->
       <div style="display:flex;gap:10px;align-items:center">
         <div style="position:relative;flex:1">
-          <input class="f-input" type="text" id="items-search" placeholder="Пошук матеріалу…" oninput="renderItemsTab()" style="padding-right:32px;width:100%;box-sizing:border-box">
+          <input class="f-input" type="text" id="items-search" placeholder="Пошук матеріалу…" oninput="renderItemsTab()" onkeydown="if(event.key==='Enter')addManualItem()" style="padding-right:32px;width:100%;box-sizing:border-box">
           <button onclick="document.getElementById('items-search').value='';renderItemsTab()" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--ink3);font-size:16px;line-height:1">×</button>
         </div>
-        <button onclick="openAddItemModal()" style="padding:8px 18px;background:var(--gold);color:#fff;border:none;border-radius:var(--r);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">+ Додати вручну</button>
+        <button onclick="addManualItem()" style="padding:8px 18px;background:var(--gold);color:#fff;border:none;border-radius:var(--r);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">+ Додати вручну</button>
       </div>
 
       <!-- Filter toolbar -->
