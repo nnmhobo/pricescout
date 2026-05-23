@@ -183,7 +183,7 @@ _SYNONYM_GROUPS: list[set[str]] = [
     # Putty
     {"шпаклевка", "шпаклювання", "шпатлевка", "шпаклевочная",
      "шпаклювальна", "шпатлювальна", "шпаклевочной", "шпаклевочную",
-     "шпакливка", "шпакл"},
+     "шпаклевочная", "шпаклювальна", "шпакливка", "шпакл"},
     # Adhesive
     {"клей", "клеящая", "клеюча", "клеящий", "клеевая", "adhesive"},
     # Mixture
@@ -536,14 +536,46 @@ def find_best_match(
         MatchResult with the best match, or None if no match passes
         the threshold + key-token verification.
     """
-    results = find_top_matches(
-        query, candidates,
-        threshold=threshold, top_n=top_n, log_fn=log_fn,
-    )
-    if results:
+    if not query or not candidates:
+        return None
+
+    scored: list[tuple[float, int, str]] = []  # (score, index, name)
+
+    for i, candidate in enumerate(candidates):
+        if not candidate or not candidate.strip():
+            continue
+        sc = calculate_match_score(query, candidate)
+        scored.append((sc, i, candidate))
+
+    if not scored:
+        return None
+
+    # Sort by score descending
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    # Debug logging
+    top = scored[:top_n]
+    _log_candidates(query, top, log_fn)
+
+    # Try each candidate from best to worst
+    for sc, idx, name in scored:
+        if sc < threshold:
+            break  # All remaining are worse
+
+        # Verify key tokens to reject garbage matches
+        if not _verify_key_tokens(query, name):
+            if log_fn:
+                log_fn(f"  [Matcher] Rejected (key tokens): {name[:60]} (score={sc:.0f})")
+            continue
+
+        # Accept this match
+        all_scores = [(s, n) for s, _, n in top]
         if log_fn:
-            log_fn(f"  [Matcher] Selected: {results[0].name[:60]} (score={results[0].score:.0f})")
-        return results[0]
+            log_fn(f"  [Matcher] Selected: {name[:60]} (score={sc:.0f})")
+        return MatchResult(name=name, score=sc, index=idx, all_scores=all_scores)
+
+    if log_fn:
+        log_fn(f"  [Matcher] No match above threshold ({threshold})")
     return None
 
 
@@ -560,4 +592,3 @@ def _log_candidates(query: str, top: list[tuple[float, int, str]], log_fn):
     log_fn("  [Matcher] Candidates:")
     for sc, _, name in top:
         log_fn(f"    {sc:5.0f} -> {name[:70]}")
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           
