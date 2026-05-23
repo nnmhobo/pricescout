@@ -61,7 +61,7 @@ MAX_INNER_WORKERS = int(os.getenv("MAX_INNER_WORKERS", "8"))
 MAX_INNER_WORKERS_DISCOVERY = int(os.getenv("MAX_INNER_WORKERS_DISCOVERY", "10"))
 
 
-def _clamp_parallel(value, fallback: int = DEFAULT_PARALLEL_ITEMS) -> int:
+def clamp_parallel(value, fallback: int = DEFAULT_PARALLEL_ITEMS) -> int:
     """Clamp a user-supplied parallelism setting into [1, MAX_PARALLEL_ITEMS].
 
     Invalid / missing values fall back to ``fallback``.
@@ -91,7 +91,7 @@ def _ua_sort_key(text) -> str:
     return str(text).lower().translate(_UA_SORT_FOLD)
 
 
-def _apply_overrides(results: list[dict]) -> list[dict]:
+def apply_overrides(results: list[dict]) -> list[dict]:
     """Splice manual_price / comment from supplier_entries into a fresh
     result list. Each row gets:
 
@@ -129,7 +129,7 @@ def _apply_overrides(results: list[dict]) -> list[dict]:
     return results
 
 
-def _sort_results(results: list[dict]) -> list[dict]:
+def sort_results(results: list[dict]) -> list[dict]:
     """Order a flat result list as `item1: [all suppliers], item2: [all], …`.
 
     Primary key — `item_label` (the material name from the кошторис) so the
@@ -144,7 +144,7 @@ def _sort_results(results: list[dict]) -> list[dict]:
     )
 
 
-def _apply_limit(item_ids: list[str], limit) -> list[str]:
+def apply_limit(item_ids: list[str], limit) -> list[str]:
     """Return the first ``limit`` ids, or the full list when limit is
     falsy / out of range."""
     if not item_ids:
@@ -367,7 +367,7 @@ def _run_batch(
     """Main batch orchestrator. Runs in a background thread.
 
     ``parallel_items`` and ``limit`` come from the UI and are validated by
-    :func:`_clamp_parallel` / :func:`_apply_limit` before use.
+    :func:`clamp_parallel` / :func:`apply_limit` before use.
 
     ``discovery_mode=True`` forces all suppliers to be checked for every item,
     ignoring SKIP_STALE_DAYS and the session cache. Use once to build the
@@ -379,12 +379,12 @@ def _run_batch(
     _session_cache.clear()
 
     total_requested = len(item_ids)
-    item_ids = _apply_limit(item_ids, limit)
+    item_ids = apply_limit(item_ids, limit)
     # Discovery mode runs items sequentially to keep concurrent browser count low.
     if discovery_mode and parallel_items is None:
         workers = 1
     else:
-        workers = _clamp_parallel(parallel_items)
+        workers = clamp_parallel(parallel_items)
     state["running"] = True
     state["stop_requested"] = False
     state["log"] = []
@@ -447,7 +447,7 @@ def _run_batch(
         for iid in item_ids:
             run_results.extend(item_states.get(iid, {}).get("results", []))
 
-        state["results"] = _sort_results(_apply_overrides(run_results))
+        state["results"] = sort_results(apply_overrides(run_results))
         state["last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
         stopped_note = " (зупинено)" if state.get("stop_requested") else ""
         log(f"Все готово{stopped_note}. {len(run_results)} цін по {len(item_ids)} матеріалах.")
@@ -483,3 +483,4 @@ def start_batch(
         kwargs={"parallel_items": parallel_items, "limit": limit, "discovery_mode": discovery_mode},
         daemon=True,
     ).start()
+          

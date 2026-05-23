@@ -93,6 +93,21 @@ CATEGORY_ROUTING = {
 # Fallback for unknown categories
 DEFAULT_SUPPLIERS = GENERAL_SUPPLIERS
 
+# Labels that clearly indicate a retail building material regardless of the
+# category field (which may be wrong or generic). Defined at module level so
+# the list is built once, not on every routing call.
+RETAIL_OVERRIDE_KW = [
+    "шпаклівка", "шпакл", "штукатурка", "грунтовка", "ґрунтовка",
+    "грунт-фарба", "фарба", "клей для плитки", "клей для піноп",
+    "клеюча суміш", "суміш клеюча", "суміш для штукатурки",
+    "суміш для приклеювання", "стяжка", "наливна підлога",
+    "самовирівн", "затирка", "гідроізоляція", "утеплювач",
+    "пінопласт", "мінвата", "базальтова вата", "гіпсокартон",
+    "профіль cd", "профіль ud", "саморіз", "дюбель",
+    "монтажна піна", "герметик", "цемент", "пісок",
+    "ceresit", "knauf", "baumit", "polimin", "siltek",
+]
+
 
 def get_suppliers_for_item(item: dict, all_supplier_ids: list) -> list:
     """
@@ -114,18 +129,7 @@ def get_suppliers_for_item(item: dict, all_supplier_ids: list) -> list:
 
     # Override: if the item label clearly indicates a retail building material,
     # send it to all general suppliers regardless of the (possibly wrong) category.
-    _RETAIL_OVERRIDE_KW = [
-        "шпаклівка", "шпакл", "штукатурка", "грунтовка", "ґрунтовка",
-        "грунт-фарба", "фарба", "клей для плитки", "клей для піноп",
-        "клеюча суміш", "суміш клеюча", "суміш для штукатурки",
-        "суміш для приклеювання", "стяжка", "наливна підлога",
-        "самовирівн", "затирка", "гідроізоляція", "утеплювач",
-        "пінопласт", "мінвата", "базальтова вата", "гіпсокартон",
-        "профіль cd", "профіль ud", "саморіз", "дюбель",
-        "монтажна піна", "герметик", "цемент", "пісок",
-        "ceresit", "knauf", "baumit", "polimin", "siltek",
-    ]
-    for kw in _RETAIL_OVERRIDE_KW:
+    for kw in RETAIL_OVERRIDE_KW:
         if kw in label:
             specialists = [sid for sid in GENERAL_SUPPLIERS if sid in enabled_set]
             return specialists + marketplace_tail
@@ -139,6 +143,4 @@ def get_suppliers_for_item(item: dict, all_supplier_ids: list) -> list:
         return marketplace_tail
 
     # Intersect with what's currently enabled, preserving routing order,
-    # then append marketplaces so they probe AFTER specialists.
-    specialists = [sid for sid in routed if sid in enabled_set]
-    return specialists + marketplace_tail
+    # 

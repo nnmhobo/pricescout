@@ -22,6 +22,13 @@ app.register_blueprint(exports_bp)
 app.register_blueprint(kostoris_bp)
 app.register_blueprint(projects_bp)
 
+# Initialize DB at import time so WSGI servers (gunicorn, waitress) also
+# create tables — not just `python app.py` direct runs.
+from core.core import ensure_exports_dir, ensure_debug_dir
+init_db()
+ensure_exports_dir()
+ensure_debug_dir()
+
 
 def _asset_version() -> str:
     """Bust the browser cache for static/js/app.js and static/css/app.css.
@@ -48,15 +55,9 @@ def index():
 
 
 if __name__ == "__main__":
-    init_db()
-    from core.core import ensure_exports_dir, ensure_debug_dir
-    ensure_exports_dir()
-    ensure_debug_dir()
     port     = int(os.getenv("PORT", 5000))
     parallel = int(os.getenv("MAX_PARALLEL_ITEMS", "5"))
     print("=" * 52)
     print("  PriceScout — Моніторинг цін будматеріалів")
     print(f"  http://localhost:{port}")
-    print(f"  Паралельність: {parallel} матеріалів одночасно")
-    print("=" * 52)
-    app.run(debug=False, host="0.0.0.0", port=port, threaded=True)
+    print(f"  Паралельність: {parallel} матер�
