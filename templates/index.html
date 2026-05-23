@@ -318,17 +318,17 @@
         <div class="panel-sub">Всі збережені матеріали для моніторингу цін</div>
       </div>
 
-      <!-- Manual add — button only; full form lives in the modal -->
-      <div style="display:flex;justify-content:flex-end">
+      <!-- Search + add button on one row -->
+      <div style="display:flex;gap:10px;align-items:center">
+        <div style="position:relative;flex:1">
+          <input class="f-input" type="text" id="items-search" placeholder="Пошук матеріалу…" oninput="renderItemsTab()" style="padding-right:32px;width:100%;box-sizing:border-box">
+          <button onclick="document.getElementById('items-search').value='';renderItemsTab()" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--ink3);font-size:16px;line-height:1">×</button>
+        </div>
         <button onclick="openAddItemModal()" style="padding:8px 18px;background:var(--gold);color:#fff;border:none;border-radius:var(--r);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">+ Додати вручну</button>
       </div>
 
-      <!-- Toolbar -->
+      <!-- Filter toolbar -->
       <div style="display:flex;gap:10px;align-items:center">
-        <div style="position:relative;flex:1;max-width:340px">
-          <input class="f-input" type="text" id="items-search" placeholder="Пошук…" oninput="renderItemsTab()" style="padding-right:28px">
-          <button onclick="document.getElementById('items-search').value='';renderItemsTab()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--ink3);font-size:14px;line-height:1">×</button>
-        </div>
         <select id="items-filter-source" onchange="renderItemsTab()" style="font-size:12px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans)">
           <option value="">Всі джерела</option>
           <option value="manual">Додано вручну</option>
@@ -533,4 +533,4 @@
 </script>
 <script src="{{ url_for('static', filename='js/app.js') }}?v={{ asset_version }}"></script>
 </body>
-</html>                                                                                                                                                                                                                                                                                                                                                                    
+</html>
