@@ -1,231 +1,129 @@
 """
 monitorable.py — Item-level monitorability detection for PriceScout.
 
-Determines whether a building material item can realistically be found
-on Ukrainian retail supplier websites (Епіцентр К, КУБ, М2, etc.).
+Logic: permissive by default — everything is monitorable unless its label
+matches a SKIP keyword.
 
-Logic: keyword-based matching on item label.
-- RETAIL_KW: words that indicate a retail-purchasable product
-- SKIP_KW: words that override retail detection (industrial/specialist items)
+SKIP_KW covers only items that genuinely do not exist on Ukrainian retail
+building-material sites:
+  - Energy/utility carriers (electricity, gasoline, fuel, water, gases)
+  - Industrial rags / textile waste
+  - Welding gases and industrial solvents
+  - Sensors, automation instruments, fire/security alarm electronics
+  - UPS, industrial batteries
+  - Cranes / hoisting equipment
+  - A handful of very specific non-retail misc items
 
-Based on analysis of 603 real АВК-5 items — ~19% are monitorable.
+Everything else — bolts, cables, steel profiles, valves, door hardware,
+HVAC panels, insulation, paints, fasteners, etc. — should be tried on
+suppliers. Worst case: the scraper returns "not found", which is fine.
 """
 
-# ── Items that ARE findable on retail building suppliers ─────────────────────
+from __future__ import annotations
 
-RETAIL_KW = [
-    # Dry mixes & adhesives
-    'штукатурка', 'шпаклівка', 'шпакл', 'стяжка', 'самовирівн', 'наливна підлога',
-    'суміш для штукатурки', 'суміш самовирівн', 'суміш клеюча', 'клеюча суміш',
-    'суміш для приклеювання', 'суміш для кріплення', 'суміш для захисту',
-    'суміш для утеплення', 'суміш для армування',
-    'клей для плитки', 'клей для піноп', 'клей для мінер', 'клей теплоіз',
-    'клей для газоблоку', 'клей для камін', 'плиточний клей',
-    'затирка', 'кольоровий шов',
-    'ґрунтовка', 'грунтовка', 'бетоноконтакт',
-    'гідроізоляційна суміш', 'гідроізоляційна стрічка',
-    'цементно-піщана суміш', 'піскоцементна',
-    'декоративна штукатурка', 'декоративно-мозаїчна суміш',
+# Items that are NOT findable on retail building suppliers.
+# Keep this list SHORT — only things no retail construction site stocks.
+SKIP_KW: list[str] = [
+    # Energy / utility carriers
+    "електроенергия",   # Russian form
+    "електроенергія",   # Ukrainian form
+    "бензин",
+    "мастильні матеріали",
+    "гідравлічна рідина",
+    "стиснене повітря",
+    "дрова",
+    "пропан-бутан",
+    "ацетилен",
+    "кисень технічний",
+    "гас для технічних",
 
-    # Paints & coatings
-    'фарба фасадна', 'фарба інтер', 'фасадна фарба', 'інтер\'єрна фарба',
-    'ґрунт-фарба', 'грунт-фарба', 'фарба грунт',
-    'емаль антикорозійна', 'аерозольна фарба',
+    # Water
+    "вода дистильована",
+    "вода технічна",
+    "^вода",
 
-    # Insulation
-    'пінопласт', 'пінополістирол', 'екструдований пінополістирол',
-    'мінеральна вата', 'мінвата', 'базальтова вата', 'скловата',
-    'плити теплоізоляційні із мінеральної вати',
-    'плити теплоізоляційні із мін',
-    'утеплювач', 'теплоізоляція із труб', 'вспіненого поліетел',
-    'теплоізоляція базальтова',
+    # Industrial rags / textile waste
+    "дрантя",
+    "бязь сурова",
+    "рядно",
+    "клоччя",
+    "очіс льняний",
+    "нитки швейні",
+    "серветки бавовняні",
 
-    # Drywall systems
-    'гіпсокартон', 'гкл', 'аквапанель', 'магнезитові плити',
-    'профіль cd', 'профіль ud', 'профіль cw', 'профіль uw',
-    'профіль для гіпс', 'профіль алюмінієвий кутовий',
+    # Industrial solvents (items that appear as standalone chemicals, not in retail)
+    "ацетон технічний",
+    "уайт-спірит",
+    "розчинник марки р-4",
+    "ксилол нафтовий",
+    "масло індустрійне",
+    "оліфа натуральна",
+    "дисперсія полівінілацетатна",
+    "каніфоль",
+    "вазелін технічний",
+    "моногідрат літію",
+    "тальк мелений",
+    "графіт подрібнений",
 
-    # Fasteners (retail packs)
-    'саморіз', 'дюбель', 'дюбель фасадний', 'дюбель для теплоізол',
-    'анкер шпилька', 'анкер 150',
+    # Instruments / automation / sensors
+    "датчик зовнішньої",
+    "датчик температури",
+    "датчик тиску",
+    "реле перепаду",
+    "реле тиску",
+    "електронний регулятор",
+    "теплообчислювач",
+    "регулятор перепаду тиску",
+    "електропривід",
 
-    # Construction chemicals
-    'монтажна піна', 'герметик силіконовий', 'герметик поліуретан',
-    'антигрибок', 'антисептик',
-    'антикорозійна паста',
+    # Fire & security alarm electronics
+    "сповіщувач пожежний",
+    "приймально-контрольний прилад",
+    "оповіщувач",
+    "блок технологічного обліку",
+    "модуль цифрового",
+    "акустична система",
+    "блок релейних",
+    "пристрій комутаційний",
 
-    # Waterproofing (retail products)
-    'гідроізоляція проникаюча', 'гідроізоляція ср церезіт',
-    'мастика бітумна гідроізол', 'мембрана полівінілхлоридна',
-    'плівка пароізоляційна', 'профільна мембрана',
-    'геотекстиль',
+    # UPS / industrial batteries
+    "джерело безперебійного",
+    "підсилювач-мікшер",
 
-    # Roofing retail
-    'руберойд',
-
-    # Flooring & tiles
-    'плитки керамічні для підлоги', 'плитка керам',
-
-    # Lumber (all monitorable)
-    'дошки обрізні', 'дошки необрізні', 'бруски обрізні', 'бруски необрізні',
-    'бруси необрізні', 'бруси обрізні',
-
-    # Masonry blocks
-    'цегла керамічна', 'газоблок', 'газобетон', 'керамоблок', 'шлакоблок',
-    'блоки газобетонні', 'піноблок',
-
-    # Bulk materials
-    'пісок природний', 'пісок будівельний', 'щебінь із природного',
-    'суміш піскоцементна',
-    'цемент', 'вапно будівельне негашене',
-
-    # Windows & doors (retail)
-    'блоки віконні металопластикові', 'блоки дверні металопластикові',
-    'блоки дверні алюмінієві', 'вікнний блок алюмінієвий',
-    'дошки підвіконні', 'відлив віконний',
-    'маяк штукатурний', 'кутики штукатурні',
-
-    # Plumbing retail
-    'кран кульовий латунний', 'кран кульовий', 'крани кульові',
-    'муфта pp-r', 'труби напірні з поліетилену',
-    'радіатор сталевий', 'радіатори опалювальні',  # panels — in Epicentr
-
-    # Electrical retail
-    'вимикач автоматичний', 'розетка заглиблена', 'вимикач заглиблений',
-
-    # Armature (retail bars)
-    'гарячекатана арматурна сталь',
-
-    # Mesh (retail)
-    'сітка зварна стальна', 'сітка армувальна', 'сітка кладки',
-    'сітка штукатурна скловолокниста', 'сітка армувальна фасадна',
-
-    # Misc retail
-    'портландцемент',
-]
-
-# ── Items that OVERRIDE retail detection — industrial/specialist only ─────────
-
-SKIP_KW = [
-    # Wire & cable (industrial)
-    'дріт сталевий', 'дріт канатний', 'дріт зварювальний', 'дріт оцинкований',
-    'дріт арматурний', 'катанка', 'канат подвійного', 'канат прядив',
-    'кабель', 'провід вв', 'провід nym',
-
-    # Industrial fasteners & metalwork
-    'болт із шестигранною', 'болти будівельні з гайками',
-    'болти анкерні', 'болт з гайкою м12', 'болт з гайкою м8',
-    'гайка', 'шайба', 'цвях будівельний', 'цвяхи будівельні',
-    'електрод', 'шпилька м8', 'шпилька м',
-
-    # Structural steel
-    'швелер', 'сталь листова', 'сталь кругла', 'сталь кутова',
-    'сталь штабова', 'сталь швелерна', 'катанка гарячекатана',
-    'поковки з квадратних', 'металоконструкції індивідуальні',
-    'окремі конструктивні елементи',
-
-    # Metal plates & clips (industrial)
-    'пластина 10х', 'пластина 6х', 'пластина гумова', 'прокладки гумові',
-    'скоба будівельна', 'клямер', 'затискач', 'клема фальц',
-    'тримач дроту', 'кронштейн ринви', 'бурт з фланцем',
-
-    # Welding consumables
-    'ацетилен', 'кисень технічний', 'гас для технічних',
-    'припої', 'каніфоль', 'лак електроізол', 'лак безбарвний електро',
-    'вазелін технічний', 'моногідрат літію',
-
-    # Solvents & industrial chemicals
-    'ацетон технічний', 'уайт-спірит', 'розчинник марки р-4',
-    'ксилол нафтовий', 'пропан-бутан', 'масло індустрійне',
-    'оліфа натуральна', 'дисперсія полівінілацетатна', 'лак кам',
-
-    # Rags, consumables, misc industrial
-    'дрантя', 'бязь сурова', 'рядно', 'клоччя', 'тальк мелений',
-    'графіт подрібнений', 'папір шліфувальний', 'нитки швейні',
-    'серветки бавовняні', 'пароніт', 'очіс льняний',
-
-    # Instruments & automation
-    'датчик', 'термостат danfoss', 'термостат', 'датчик зовнішньої',
-    'датчик температури', 'реле перепаду', 'реле тиску',
-    'електронний регулятор', 'теплообчислювач', 'регулятор перепаду тиску',
-    'регулюовальний клапан vrb', 'електропривід', 'ключ есл',
-
-    # HVAC equipment
-    'рекуператор', 'витяжна установка', 'насос циркуляційний',
-    'насос заглибний', 'теплообмінник', 'баки розширювальні',
-    'повітровідвідник автоматичний',
-
-    # Industrial valves & flanges
-    'фланці плоскі приварні', 'засувка', 'відвід гнутий під кутом',
-    'перехід штампований', 'кран сталевий фланцевий',
-    'клапан зворотній', 'клапан запобіжний', 'клапани запобіжні',
-
-    # Security & fire systems
-    'сповіщувач пожежний', 'приймально-контрольний прилад',
-    'оповіщувач', 'блок технологічного обліку', 'модуль цифрового',
-    'акустична система', 'блок релейних', 'пристрій комутаційний',
-
-    # UPS, batteries, special electrical
-    'джерело безперебійного', 'акумулятори', 'підсилювач-мікшер',
-    'шина з\'єднувальна', 'щиток розподільчий',
-    'щиток навісний', 'блок ре/n',
-
-    # Energy carriers
-    'електроенергія', 'бензин', 'мастильні матеріали',
-    'гідравлічна рідина', 'стиснене повітря', 'дрова',
-
-    # Cranes & hoists
-    'штабелер',
+    # Cranes & hoisting
+    "штабелер",
 
     # Misc non-retail
-    'вода дистильована', 'вода технічна', '^вода$',
-    'бирка маркувальна', 'рамка для написів', 'кнопка к',
-    'патрони д або', 'патрони до пістолета', 'склострічка липка ізоляційна',
-    'стрічка ізоляційна', 'стрічка монтажна лм',
-    'наконечники алюмінієві для опресування',
-    'лампи розжарювання',
-    'система антипаніка', 'зачинювач дверний',
-    'свердла кільцеві алмазні',
-    'пластина з ПВХ',  # window trim — not sold separately
-    'злив 60', 'штуцер з різьбою',
-    'декоративне огородження радіаторів',
-    'ізоляція теплообмінника',
-    'блоки незнімної опалубки',
-    'просічно-витяжний лист',
-    'грязезахисні грати',
-    'тактильна стрічка', 'тактильна табличка', 'тактильні попереджувальні',
-    'наліпка', 'плитки тактильні',
+    "бирка маркувальна",
+    "рамка для написів",
+    "кнопка к",
+    "патрони д або",
+    "патрони до пістолета",
+    "тактильна стрічка",
+    "тактильна табличка",
+    "тактильні попереджувальні",
+    "наліпка",
+    "плитки тактильні",
+    "грязезахисні грати",
+    "пароніт",
+    "папір шліфувальний",
+    "просічно-витяжний лист",
 ]
 
 
-def is_monitorable(label: str, category: str = '') -> bool:
-    """
-    Returns True if this item is likely findable on retail building suppliers.
-
-    ``category`` is accepted for backwards compatibility with callers that
-    still pass it positionally; the keyword-based classifier only looks at
-    the label.
-
-    Priority:
-    1. Skip keywords override everything → not monitorable
-    2. Retail keywords → monitorable
-    3. Default → not monitorable (conservative)
-    """
-    del category  # retained for API stability; not consulted
-    ll = label.lower().strip()
-
-    # Check skip keywords first (higher priority)
+def is_monitorable(label: str) -> bool:
+    """Return True if *label* is likely findable on Ukrainian retail
+    building-material sites.  Returns True by default (permissive);
+    returns False only when the label clearly matches a SKIP keyword."""
+    if not label:
+        return True
+    lower = label.lower().strip()
     for kw in SKIP_KW:
-        if kw.startswith('^') and kw.endswith('$'):
-            # exact match
-            if ll == kw[1:-1]:
+        if kw.startswith("^"):
+            # Anchored match: must start with the keyword (minus the ^)
+            if lower.startswith(kw[1:].lower()):
                 return False
-        elif kw in ll:
-            return False
-
-    # Check retail keywords
-    for kw in RETAIL_KW:
-        if kw in ll:
-            return True
-
-    return False
+        else:
+            if kw.lower() in lower:
+                return False
+    return True

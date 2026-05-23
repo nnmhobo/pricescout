@@ -916,4 +916,20 @@ def _find_product_url_from_page(page, product_name: str, cfg: SiteConfig) -> Opt
                 continue
             if cfg.domain not in href and not href.startswith("/"):
                 continue
-            link_texts.appe
+            link_texts.append(_text_of(link))
+            link_hrefs.append(href)
+
+        if not link_texts:
+            return None
+
+        match = find_best_match(product_name, link_texts, threshold=DEFAULT_THRESHOLD)
+        if match is None:
+            return None
+
+        best_url = link_hrefs[match.index]
+        if best_url.startswith("/"):
+            best_url = f"https://{cfg.domain}{best_url}"
+        return best_url
+    except Exception:
+        pass
+    return None

@@ -271,4 +271,5 @@ def export_price_matrix():
         output,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         as_attachment=True,
-        download_name=filena
+        download_name=filename,
+    )
