@@ -97,6 +97,15 @@ def _migrate(conn):
             WHERE project_id IS NOT NULL
         """)
 
+    # Key-value settings table — used to record one-time migrations so they
+    # don't repeat on every startup.
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+    """)
+
     # Price history table
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS price_history (
@@ -118,6 +127,24 @@ def _migrate(conn):
         ]
         if updates:
             conn.executemany("UPDATE items SET monitorable=? WHERE id=?", updates)
+
+    # One-time migration: re-evaluate all items with the new permissive
+    # is_monitorable() (v2 — default True instead of default False).
+    # Runs exactly once, tracked in the settings table.
+    v = conn.execute(
+        "SELECT value FROM settings WHERE key='monitorable_version'"
+    ).fetchone()
+    if v is None or int(v[0]) < 2:
+        rows = conn.execute("SELECT id, label FROM items").fetchall()
+        updates = [
+            (1 if is_monitorable(label or "") else 0, item_id)
+            for item_id, label in rows
+        ]
+        if updates:
+            conn.executemany("UPDATE items SET monitorable=? WHERE id=?", updates)
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('monitorable_version', '2')"
+        )
 
 
 _FLOAT_FIELDS = {"manual_price", "qty", "estimate_unit_price"}
@@ -628,4 +655,82 @@ def get_project_items(project_id: str) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
             """SELECT i.* FROM items i
-               JOIN project_items pi ON pi.
+               JOIN project_items pi ON pi.item_id = i.id
+               WHERE pi.project_id = ?
+               ORDER BY i.label""",
+            (project_id,)
+        ).fetchall()
+        if not rows:
+            return []
+        item_ids = [r["id"] for r in rows]
+        ph = ",".join("?" * len(item_ids))
+        sup_rows = conn.execute(
+            f"SELECT * FROM supplier_entries WHERE item_id IN ({ph})", item_ids
+        ).fetchall()
+        sup_map = _build_sup_map(sup_rows)
+        return [_row_to_dict(r, sup_map.get(r["id"], {})) for r in rows]
+
+
+def add_item_to_project(project_id: str, item_id: str):
+    with get_conn() as conn:
+        conn.execute(
+                "INSERT OR IGNORE INTO project_items (project_id, item_id, added) VALUES (?, ?, ?)",
+            (project_id, item_id, datetime.now().isoformat())
+        )
+
+
+def remove_item_from_project(project_id: str, item_id: str):
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM project_items WHERE project_id=? AND item_id=?",
+            (project_id, item_id)
+        )
+
+
+def get_item_projects(item_id: str) -> list[str]:
+    """Return list of project_ids the item belongs to."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT project_id FROM project_items WHERE item_id=?", (item_id,)
+        ).fetchall()
+        return [r[0] for r in rows]
+
+
+# ── Price history ──────────────────────────────────────────────
+
+def get_price_history(item_id: str, supplier_id: str | None = None) -> list[dict]:
+    with get_conn() as conn:
+        if supplier_id:
+            rows = conn.execute(
+                """SELECT supplier_id, price, checked_at FROM price_history
+                   WHERE item_id=? AND supplier_id=? ORDER BY checked_at""",
+                (item_id, supplier_id)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT supplier_id, price, checked_at FROM price_history
+                   WHERE item_id=? ORDER BY checked_at""",
+                (item_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_price_history_bulk(item_ids: list[str]) -> dict[str, list[dict]]:
+    """Return price history grouped by item_id for multiple items at once."""
+    if not item_ids:
+        return {}
+    placeholders = ",".join("?" * len(item_ids))
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT item_id, supplier_id, price, checked_at FROM price_history
+                WHERE item_id IN ({placeholders}) ORDER BY item_id, checked_at""",
+            item_ids
+        ).fetchall()
+    result: dict[str, list[dict]] = {}
+    for r in rows:
+        result.setdefault(r["item_id"], []).append({
+            "supplier_id": r["supplier_id"],
+            "price": r["price"],
+            "checked_at": r["checked_at"],
+        })
+    return result
