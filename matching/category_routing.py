@@ -143,4 +143,6 @@ def get_suppliers_for_item(item: dict, all_supplier_ids: list) -> list:
         return marketplace_tail
 
     # Intersect with what's currently enabled, preserving routing order,
-    # 
+    # then append marketplaces so they probe AFTER specialists.
+    specialists = [sid for sid in routed if sid in enabled_set]
+    return specialists + marketplace_tail

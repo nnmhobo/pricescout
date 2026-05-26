@@ -157,7 +157,7 @@ def _parse_df(df: pd.DataFrame) -> list[dict]:
         else:
             category = 'Матеріали будівельні'
 
-        is_retail = is_monitorable(name, category)
+        is_retail = is_monitorable(name)
         items.append({
             'code':       code,
             'name':       name,

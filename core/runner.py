@@ -249,7 +249,7 @@ def _run_single_item(item_id: str, active_suppliers: list, discovery_mode: bool 
             entry = sups_data.get(s["id"])
             if entry and not entry.get("found") and entry.get("last_checked"):
                 try:
-                    last = datetime.strptime(entry["last_checked"], "%d.%m.%Y %H:%M")
+                    last = datetime.strptime(entry["last_checked"], "%Y-%m-%d %H:%M")
                     age = (datetime.now() - last).days
                     if age < SKIP_STALE_DAYS:
                         skipped.append(s)

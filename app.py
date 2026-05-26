@@ -60,4 +60,6 @@ if __name__ == "__main__":
     print("=" * 52)
     print("  PriceScout — Моніторинг цін будматеріалів")
     print(f"  http://localhost:{port}")
-    print(f"  Паралельність: {parallel} матер�
+    print(f"  Паралельність: {parallel} матеріалів одночасно")
+    print("=" * 52)
+    app.run(debug=False, host="0.0.0.0", port=port, threaded=True)

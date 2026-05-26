@@ -204,10 +204,10 @@
     .import-drop-icon { font-size:28px; margin-bottom:8px; }
     .import-drop-txt { font-size:13px; color:var(--ink3); }
     .import-drop-sub { font-size:11px; color:var(--border2); margin-top:4px; }
-    .import-stats { display:flex; gap:14px; }
-    .import-stat { flex:1; background:var(--white); border:1px solid var(--border); border-radius:var(--r-lg); padding:14px 16px; text-align:center; box-shadow:var(--shadow-sm); }
-    .import-stat-val { font-family:var(--serif); font-size:26px; }
-    .import-stat-lbl { font-size:10px; text-transform:uppercase; letter-spacing:0.1em; color:var(--ink3); margin-top:3px; }
+    .import-stats { display:flex; align-items:center; justify-content:center; gap:32px; padding:10px 20px; background:var(--white); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--shadow-sm); width:100%; box-sizing:border-box; }
+    .import-stat { display:flex; align-items:baseline; gap:7px; }
+    .import-stat-val { font-family:var(--serif); font-size:20px; font-weight:600; }
+    .import-stat-lbl { font-size:11px; color:var(--ink3); text-transform:uppercase; letter-spacing:0.07em; }
     .import-filter { display:flex; gap:5px; align-items:center; flex-wrap:wrap; }
     .import-filter label, .cat-chip { font-size:10px; color:var(--ink3); display:inline-flex; align-items:center; gap:3px; cursor:pointer; padding:2px 7px; background:var(--paper); border:1px solid var(--border); border-radius:3px; white-space:nowrap; line-height:1.4; }
     .cat-chip input[type=checkbox] { width:11px; height:11px; margin:0; cursor:pointer; }
@@ -292,3 +292,45 @@
     /* theme toggle button keeps consistent look against the dark header */
     [data-theme="dark"] #theme-toggle { color: rgba(255,255,255,0.4) !important; }
     [data-theme="dark"] #theme-toggle:hover { color: rgba(255,255,255,0.75) !important; }
+    /* Import filter buttons — ensure readable text in dark mode */
+    [data-theme="dark"] .btn-sel-all { background: var(--paper2); color: var(--ink); border-color: var(--border2); }
+    [data-theme="dark"] .btn-sel-all:hover { background: var(--white); }
+    /* Stop-button hover tooltip */
+    .stop-tip-box {
+      display: none;
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%);
+      width: 220px;
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      box-shadow: var(--shadow);
+      padding: 8px 12px;
+      font-size: 11px;
+      line-height: 1.5;
+      color: var(--ink3);
+      pointer-events: none;
+      z-index: 200;
+      text-align: center;
+    }
+    .stop-tip-box::before {
+      content: '';
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 5px solid transparent;
+      border-top-color: var(--border);
+    }
+    .stop-tip-box::after {
+      content: '';
+      position: absolute;
+      top: calc(100% - 1px);
+      left: 50%;
+      transform: translateX(-50%);
+      border: 5px solid transparent;
+      border-top-color: var(--white);
+    }
+    .stop-tip-wrap:hover .stop-tip-box { display: block; }

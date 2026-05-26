@@ -100,6 +100,7 @@ def status():
         "done_items":     sum(1 for s in item_states.values() if s.get("done")),
         "found_items":    sum(1 for s in item_states.values() if s.get("results")),
         "batch_started_at": state.get("batch_started_at"),
+        "item_ids":       list(item_states.keys()),
     })
 
 

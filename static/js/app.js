@@ -186,6 +186,84 @@
     }
   }).catch(() => {});
 
+  // ── Resume active run on page reload ─────────────────────────
+  fetch('/api/status').then(r => r.json()).then(d => {
+    updateDot(d);
+    if (d.last_run) {
+      document.getElementById('last-run').textContent   = 'Останній запуск: ' + d.last_run;
+      document.getElementById('badge-date').textContent = d.last_run;
+      document.getElementById('log-sub').textContent    = d.last_run;
+    }
+    if (d.label) {
+      const bl = document.getElementById('badge-label');
+      bl.textContent = d.label; bl.style.display = '';
+    }
+    if (d.running) {
+      const isBatch = d.parallel_items && d.total_items > 1;
+      if (isBatch) {
+        // ── Reconnect to a running batch run ──────────────────────────
+        batchRunning = true;
+        batchStopped = false;
+        const monBtn = Array.from(document.querySelectorAll('.nav-btn'))
+          .find(b => b.textContent.trim() === 'Моніторинг');
+        showPanel('monitor', monBtn);
+        setMonitorMode('batch');   // sets correct tab highlight + shows batch panel
+        document.getElementById('batch-log-wrap').style.display = 'flex';
+        document.getElementById('btn-run-batch').disabled = true;
+        const stopBtn = document.getElementById('btn-stop-batch');
+        document.getElementById('btn-stop-batch-wrap').style.display = ''; stopBtn.disabled = false;
+        stopBtn.textContent = '◼ Зупинити';
+        // Call AFTER setMonitorMode so renderMonitorTab() doesn't overwrite it
+        updateBatchProgress(d.done_items ?? 0, d.total_items, d.batch_started_at);
+        _startElapsedTick(d.batch_started_at);
+        // Restore monitorQueue from the item_ids the server still knows about
+        if (d.item_ids && d.item_ids.length) {
+          fetch('/api/items').then(r => r.json()).then(allItems => {
+            const idSet = new Set(d.item_ids);
+            monitorQueue = allItems.filter(i => idSet.has(i.id));
+            monitorDone  = d.done_items ?? 0;
+            renderMonitorTab();
+          }).catch(() => {});
+        }
+        // Lightweight poll — updates progress bar until the run ends
+        (async function reconnectBatchPoll() {
+          let lastLogLen = 0;
+          while (true) {
+            await new Promise(r => setTimeout(r, 1500));
+            const s = await fetch('/api/status?log_offset=' + lastLogLen).then(r => r.json());
+            updateDot(s);
+            if (s.log && s.log.length) appendBatchLog(s.log);
+            if (s.total_items) updateBatchProgress(s.done_items ?? 0, s.total_items, s.batch_started_at);
+            lastLogLen = s.log_total ?? (lastLogLen + (s.log || []).length);
+            if (!s.running) break;   // wait for server to confirm fully stopped
+          }
+          batchRunning = false;
+          batchStopped = false;
+          _stopElapsedTick();
+          document.getElementById('btn-run-batch').disabled = false;
+          document.getElementById('btn-stop-batch-wrap').style.display = 'none';
+          // Refresh queue items with final state (prices, last_checked, etc.)
+          const updatedItems = await fetch('/api/items').then(r => r.json());
+          monitorQueue = monitorQueue.map(q => ({...(updatedItems.find(u => u.id === q.id) || q), _done: true}));
+          const finalResults = await fetch('/api/results').then(r => r.json());
+          if (finalResults && finalResults.length > 0) {
+            loadResults(); setExcelBtn(true);
+            document.getElementById('cnt-badge').textContent = ' (' + finalResults.length + ')';
+            const resBtn = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Результати'));
+            if (resBtn) showPanel('results', resBtn);
+          }
+          renderMonitorTab();
+        })();
+      } else {
+        // ── Reconnect to a running single-item scrape ─────────────────
+        document.getElementById('run-btn').disabled = true;
+        document.getElementById('stop-btn').style.display = '';
+        showPanel('log', document.querySelector('.nav-btn'));
+        poll();
+      }
+    }
+  }).catch(() => {});
+
   // ── Load persisted state on startup ──────────────────────────
   // last run results
   fetch('/api/results').then(r => r.json()).then(items => {
@@ -202,7 +280,6 @@
     importItems = d.items;
     selectedNames = new Set(d.items.map(i => i.name));
     document.getElementById('imp-total').textContent  = d.total;
-    document.getElementById('imp-retail').textContent = d.retail;
     document.getElementById('imp-sel').textContent    = selectedNames.size;
     document.getElementById('import-stats-row').style.display = '';
     document.getElementById('import-table-wrap').style.display = 'flex';
@@ -294,7 +371,11 @@
         if (logStatus) logStatus.textContent = statusText;
         if (monStatus) monStatus.textContent = statusText;
         // Always load results (covers manual stop with partial results)
-        if (d.count > 0) { loadResults(); setExcelBtn(true); }
+        if (d.count > 0) {
+          loadResults(); setExcelBtn(true);
+          const resBtn = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Результати'));
+          if (resBtn) showPanel('results', resBtn);
+        }
         loadItems(); // refresh supplier status in dropdown
       }
     });
@@ -620,7 +701,6 @@
         importItems = d.items;
         selectedNames = new Set(importItems.map(i => i.name));
         document.getElementById('imp-total').textContent = d.total;
-        document.getElementById('imp-retail').textContent = d.retail;
         document.getElementById('import-stats-row').style.display = '';
         document.getElementById('import-table-wrap').style.display = 'flex';
         drop.querySelector('.import-drop-txt').textContent = '✓ ' + file.name;
@@ -1139,15 +1219,12 @@
 
   function stopBatch() {
     batchStopped = true;
-    fetch('/api/stop', { method: 'POST' }).then(() => {
-      const waitAndLoad = () => fetch('/api/status').then(r => r.json()).then(s => {
-        if (s.running) { setTimeout(waitAndLoad, 800); return; }
-        if (s.count > 0) { loadResults(); setExcelBtn(true); document.getElementById('cnt-badge').textContent = ' (' + s.count + ')'; }
-      });
-      setTimeout(waitAndLoad, 800);
-    });
-    document.getElementById('btn-stop-batch').textContent = '◼ Зупиняємо…';
+    fetch('/api/stop', { method: 'POST' });
+    document.getElementById('btn-stop-batch').textContent = '⏳ Зупиняємо…';
     document.getElementById('btn-stop-batch').disabled = true;
+    batchLog('⏳ Зупиняємо — очікуємо завершення поточних запитів…');
+    // The main poll loop keeps running until s.running===false,
+    // then loads results and redirects — do NOT break early on batchStopped.
   }
 
 
@@ -1183,6 +1260,27 @@
   function _stopElapsedTick() {
     if (_elapsedTimer) { clearInterval(_elapsedTimer); _elapsedTimer = null; }
   }
+  // ── Batch log helpers (module-scope so reconnect can use them) ──
+  const MAX_LOG_LINES = 800;
+  function appendBatchLog(lines) {
+    if (!lines || !lines.length) return;
+    const logEl = document.getElementById('batch-log-body');
+    if (!logEl) return;
+    if (lines.length > MAX_LOG_LINES) lines = lines.slice(-MAX_LOG_LINES);
+    const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+    const frag = document.createDocumentFragment();
+    for (const msg of lines) {
+      const div = document.createElement('div');
+      div.className = 'tl';
+      div.textContent = msg;
+      frag.appendChild(div);
+    }
+    logEl.appendChild(frag);
+    while (logEl.childElementCount > MAX_LOG_LINES) logEl.removeChild(logEl.firstChild);
+    if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+  }
+  function batchLog(msg) { appendBatchLog([msg]); }
+
   async function runBatch() {
     if (!monitorQueue.length) return;
     if (batchRunning) return;
@@ -1193,7 +1291,7 @@
     batchStopped = false;
     batchStartTime = Date.now();
     document.getElementById('btn-run-batch').disabled = true;
-    document.getElementById('btn-stop-batch').style.display = '';
+    document.getElementById('btn-stop-batch-wrap').style.display = '';
     document.getElementById('btn-stop-batch').disabled = false;
     document.getElementById('btn-stop-batch').textContent = '◼ Зупинити';
     document.getElementById('batch-log-wrap').style.display = 'flex';
@@ -1214,30 +1312,7 @@
     // batch emits tens of thousands of lines; keeping them all (plus a
     // forced reflow per line) freezes the page. Old lines scroll off the
     // top and are dropped — the viewer keeps a bounded scrollback buffer.
-    const MAX_LOG_LINES = 800;
     let lastLogLen = 0;
-    function appendBatchLog(lines) {
-      if (!lines || !lines.length) return;
-      // A single poll can return more lines than we'd ever keep on screen —
-      // only the tail is worth rendering.
-      if (lines.length > MAX_LOG_LINES) lines = lines.slice(-MAX_LOG_LINES);
-      const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
-      const frag = document.createDocumentFragment();
-      for (const msg of lines) {
-        const div = document.createElement('div');
-        div.className = 'tl';
-        div.textContent = msg;
-        frag.appendChild(div);
-      }
-      logEl.appendChild(frag);
-      // Trim from the top so the node count stays bounded.
-      while (logEl.childElementCount > MAX_LOG_LINES) {
-        logEl.removeChild(logEl.firstChild);
-      }
-      // Only auto-scroll if user was already at the bottom.
-      if (atBottom) logEl.scrollTop = logEl.scrollHeight;
-    }
-    function batchLog(msg) { appendBatchLog([msg]); }
 
     const limit    = getBatchLimit();
     const parallel = getBatchParallel();
@@ -1259,7 +1334,7 @@
       batchRunning = false;
       batchStopped = false;
       document.getElementById('btn-run-batch').disabled = false;
-      document.getElementById('btn-stop-batch').style.display = 'none';
+      document.getElementById('btn-stop-batch-wrap').style.display = 'none';
       return;
     }
 
@@ -1267,6 +1342,8 @@
     const slicedNote = (requested && requested !== resp.item_count)
       ? ` (з ${requested})` : '';
     batchLog(`Запущено: ${resp.item_count} матеріалів${slicedNote} | ${resp.supplier_count} постачальників | паралельно: ${resp.parallel_items}`);
+    // Show 0/N immediately so the counter doesn't sit blank then jump to 100%
+    updateBatchProgress(0, resp.item_count ?? 0, null);
     await new Promise(r => setTimeout(r, 2000));
 
     lastLogLen = 0;
@@ -1277,11 +1354,10 @@
       // a capped response client-side used to freeze the log view.
       const s = await fetch('/api/status?log_offset=' + lastLogLen).then(r => r.json());
       appendBatchLog(s.log);
-      if (s.total_items) { lastTotal = s.total_items; updateBatchProgress(s.found_items ?? 0, s.total_items, s.batch_started_at); }
+      if (s.total_items) { lastTotal = s.total_items; updateBatchProgress(s.done_items ?? 0, s.total_items, s.batch_started_at); }
       lastLogLen = s.log_total ?? (lastLogLen + s.log.length);
       if (s.error) { batchLog(`⚠ ${s.error}`); break; }
-      if (!s.running) break;
-      if (batchStopped) break;
+      if (!s.running) break;   // wait for server to confirm fully stopped
       await new Promise(r => setTimeout(r, 1500));
     }
 
@@ -1291,7 +1367,7 @@
     batchStopped = false;
     _stopElapsedTick();
     document.getElementById('btn-run-batch').disabled = false;
-    document.getElementById('btn-stop-batch').style.display = 'none';
+    document.getElementById('btn-stop-batch-wrap').style.display = 'none';
     updateBatchProgress(lastTotal, lastTotal, null);
     batchLog('✅ Всі матеріали перевірено!');
     renderMonitorTab();

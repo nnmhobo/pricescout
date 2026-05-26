@@ -146,6 +146,86 @@ def _migrate(conn):
             "INSERT OR REPLACE INTO settings (key, value) VALUES ('monitorable_version', '2')"
         )
 
+    # ── schema_version=3 ─────────────────────────────────────────────────────
+    # Runs exactly once: add missing indexes, add FK to price_history,
+    # normalize all stored dates to ISO 8601 (yyyy-mm-dd / yyyy-mm-dd HH:MM).
+    sv3 = conn.execute(
+        "SELECT value FROM settings WHERE key='schema_version'"
+    ).fetchone()
+    if sv3 is None or int(sv3[0]) < 3:
+        # 1. Missing indexes
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_se_item ON supplier_entries(item_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pi_item ON project_items(item_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_items_monitorable ON items(monitorable)"
+        )
+
+        # 2. Recreate price_history with FK so item deletes cascade automatically.
+        #    Only needed when the current table has no FK clause.
+        ph_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='price_history'"
+        ).fetchone()
+        if ph_sql and "FOREIGN KEY" not in (ph_sql[0] or ""):
+            conn.execute("""
+                CREATE TABLE price_history_new (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    item_id     TEXT NOT NULL,
+                    supplier_id TEXT NOT NULL,
+                    price       REAL NOT NULL,
+                    checked_at  TEXT NOT NULL,
+                    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+                )
+            """)
+            conn.execute(
+                "INSERT INTO price_history_new SELECT * FROM price_history"
+            )
+            conn.execute("DROP TABLE price_history")
+            conn.execute(
+                "ALTER TABLE price_history_new RENAME TO price_history"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ph_item ON price_history(item_id, supplier_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ph_date ON price_history(checked_at)"
+            )
+
+        # 3. Normalize dates to ISO 8601 (old format: dd.mm.yyyy / dd.mm.yyyy HH:MM).
+        #    Detection: old dates have a dot at character position 3 (1-based).
+        conn.execute("""
+            UPDATE items
+            SET created = substr(created,7,4)||'-'||substr(created,4,2)||'-'||substr(created,1,2)
+            WHERE length(created) = 10 AND substr(created,3,1) = '.'
+        """)
+        conn.execute("""
+            UPDATE supplier_entries
+            SET last_checked =
+                substr(last_checked,7,4)||'-'||substr(last_checked,4,2)||'-'||
+                substr(last_checked,1,2)||' '||substr(last_checked,12,5)
+            WHERE last_checked IS NOT NULL
+              AND length(last_checked) = 16 AND substr(last_checked,3,1) = '.'
+        """)
+        conn.execute("""
+            UPDATE price_history
+            SET checked_at =
+                substr(checked_at,7,4)||'-'||substr(checked_at,4,2)||'-'||
+                substr(checked_at,1,2)||' '||substr(checked_at,12,5)
+            WHERE length(checked_at) = 16 AND substr(checked_at,3,1) = '.'
+        """)
+        conn.execute("""
+            UPDATE projects
+            SET created = substr(created,7,4)||'-'||substr(created,4,2)||'-'||substr(created,1,2)
+            WHERE length(created) = 10 AND substr(created,3,1) = '.'
+        """)
+
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '3')"
+        )
+
 
 _FLOAT_FIELDS = {"manual_price", "qty", "estimate_unit_price"}
 _INT_FIELDS = {"monitorable"}
@@ -319,7 +399,7 @@ def add_item(label: str, source: str = "manual",
                    (id, label, created, source, avk_code, category,
                     qty, unit, estimate_unit_price, monitorable, project_id)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (item_id, label.strip(), datetime.now().strftime("%d.%m.%Y"),
+                (item_id, label.strip(), datetime.now().strftime("%Y-%m-%d"),
                  source, avk_code.strip() if avk_code else None, category or None,
                  _coerce("qty", qty),
                  _coerce("unit", unit),
@@ -333,7 +413,7 @@ def add_item(label: str, source: str = "manual",
     return {
         "id":                  item_id,
         "label":               label.strip(),
-        "created":             datetime.now().strftime("%d.%m.%Y"),
+        "created":             datetime.now().strftime("%Y-%m-%d"),
         "source":              source,
         "avk_code":            avk_code.strip() if avk_code else None,
         "category":            category or None,
@@ -357,7 +437,7 @@ def batch_add_items(entries: list, project_id: str | None = None) -> tuple[int, 
     """
     from matching.monitorable import is_monitorable
     added = skipped = 0
-    now = datetime.now().strftime("%d.%m.%Y")
+    now = datetime.now().strftime("%Y-%m-%d")
 
     with get_conn() as conn:
         existing_labels = {r[0] for r in conn.execute("SELECT label FROM items").fetchall()}
@@ -381,7 +461,7 @@ def batch_add_items(entries: list, project_id: str | None = None) -> tuple[int, 
                 continue
 
             item_id = f"{base_id}{idx:06d}"
-            mon = 1 if is_monitorable(label, category or "") else 0
+            mon = 1 if is_monitorable(label) else 0
             rows.append((item_id, label, now, source, avk_code, category,
                          qty, unit, est_up, mon, project_id or None))
             existing_labels.add(label)
@@ -415,7 +495,7 @@ def update_supplier_entry(item_id: str, supplier_id: str,
     """Persist a fresh scrape result. Preserves any existing manual_price
     / comment override so the user's hand edits aren't wiped on the next run.
     """
-    now = datetime.now().strftime("%d.%m.%Y %H:%M")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
     with get_conn() as conn:
         existing = conn.execute(
             "SELECT manual_price, comment FROM supplier_entries WHERE item_id=? AND supplier_id=?",
@@ -573,7 +653,7 @@ def create_project(name: str, description: str | None = None,
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO projects (id, name, created, description, avk_file) VALUES (?, ?, ?, ?, ?)",
-            (project_id, name.strip(), datetime.now().strftime("%d.%m.%Y"),
+            (project_id, name.strip(), datetime.now().strftime("%Y-%m-%d"),
              description or None, avk_file or None)
         )
     return get_project(project_id)

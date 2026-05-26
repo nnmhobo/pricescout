@@ -253,7 +253,13 @@
             <input class="f-input" type="text" id="monitor-search" placeholder="Пошук…" oninput="renderMonitorTab()" style="width:160px;padding-right:22px">
             <button onclick="document.getElementById('monitor-search').value='';renderMonitorTab()" style="position:absolute;right:5px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--ink3);font-size:14px">×</button>
           </div>
-          <button id="btn-stop-batch" onclick="stopBatch()" style="display:none;flex-shrink:0;padding:8px 16px;background:#c0392b;color:#fff;border:none;border-radius:var(--r);font-size:12px;font-weight:600;font-family:var(--sans);cursor:pointer;white-space:nowrap">◼ Зупинити</button>
+          <div class="stop-tip-wrap" style="position:relative;display:none;flex-shrink:0" id="btn-stop-batch-wrap">
+            <button id="btn-stop-batch" onclick="stopBatch()" style="padding:8px 16px;background:#c0392b;color:#fff;border:none;border-radius:var(--r);font-size:12px;font-weight:600;font-family:var(--sans);cursor:pointer;white-space:nowrap;width:100%">◼ Зупинити</button>
+            <div class="stop-tip-box">
+              Поточні запити до постачальників завершаться самостійно.<br>
+              Нові запити не запускатимуться.
+            </div>
+          </div>
           <button id="btn-run-batch" onclick="runBatch()" class="run-btn" style="width:auto;padding:9px 18px;flex-shrink:0" disabled>
             <div class="run-icon"><svg width="7" height="9" viewBox="0 0 7 9" fill="var(--gold)"><path d="M0 0l7 4.5L0 9z"/></svg></div>
             Запустити чергу
@@ -408,9 +414,9 @@
       <!-- Stats (hidden until parsed) -->
       <div id="import-stats-row" style="display:none">
         <div class="import-stats">
-          <div class="import-stat"><div class="import-stat-val" id="imp-total">0</div><div class="import-stat-lbl">Всього позицій</div></div>
-          <div class="import-stat"><div class="import-stat-val" id="imp-retail" style="color:var(--teal)">0</div><div class="import-stat-lbl">Роздрібні матеріали</div></div>
-          <div class="import-stat"><div class="import-stat-val" id="imp-sel">0</div><div class="import-stat-lbl">Вибрано</div></div>
+          <div class="import-stat"><div class="import-stat-val" id="imp-total">0</div><div class="import-stat-lbl">позицій</div></div>
+          <div style="width:1px;height:16px;background:var(--border)"></div>
+          <div class="import-stat"><div class="import-stat-val" id="imp-sel">0</div><div class="import-stat-lbl">вибрано</div></div>
         </div>
       </div>
       </div>
