@@ -1,137 +1,194 @@
-# PriceScout — Моніторинг цін будматеріалів
+# PriceScout — Price Monitoring for Construction Materials
 
-Веб-застосунок на Flask для автоматичного моніторингу та порівняння цін на
-будівельні матеріали в українських інтернет-магазинах. PriceScout імпортує
-позиції з кошторисів АВК-5, шукає кожен матеріал у десятьох постачальників,
-зберігає історію цін і формує зведені прайс-матриці та звіти по проєктах в Excel.
+PriceScout searches 13 Ukrainian building-supply websites at once and shows you a side-by-side price comparison for any construction material. Import your estimate (кошторис) from АВК-5, click **Start**, and get a spreadsheet with the best prices in minutes.
 
-> Для швидкого запуску на Windows скористайтесь файлом `START.bat` —
-> інструкція у `ЯК ЗАПУСТИТИ.txt`. Нижче — технічний опис проєкту.
+---
 
-## Можливості
+## Requirements
 
-- **Імпорт кошторису АВК-5** — завантаження `.xls`/`.xlsx` (Підсумкова відомість
-  ресурсів), автоматичне виділення матеріалів, які реально продаються в роздріб.
-- **Пошук цін у 13 постачальників** — Епіцентр К, АРС, Будівельний Двір, КУБ,
-  Вен Буд, Будпостач, М2, Віста, Мегатрейд СМ, Будія, ТеплоДiм, Prom.ua, OLX.
-- **Розумний матчинг** — нечіткий пошук (rapidfuzz) з нормалізацією укр./рос.,
-  словником синонімів будматеріалів, спрощенням та варіаціями пошукових запитів.
-- **Маршрутизація за категоріями** — запит надсилається лише тим постачальникам,
-  які реально мають відповідну категорію товарів (економія часу).
-- **Discovery-режим** — повний перебір усіх товарів по всіх постачальниках для
-  побудови матриці доступності; подальші запуски пропускають відсутні позиції.
-- **Проєкти** — групування матеріалів за проєктами, порівняння кошторисної ціни
-  з найкращою знайденою, розрахунок економії.
-- **Історія цін** — кожна знайдена ціна зберігається в БД для відстеження динаміки.
-- **Експорт в Excel** — прайс-матриця (товари × постачальники) та звіти по проєктах.
-- **Керування запуском** — вибір кількості товарів і рівня паралельності прямо в UI.
+- **Windows 10 or 11**
+- **Python 3.10 or newer** — download free from [python.org/downloads](https://www.python.org/downloads/)
+  - During installation, tick **"Add python.exe to PATH"** on the first screen
+- Internet connection (for scraping supplier websites)
 
-## Стек технологій
+---
 
-- **Python 3.10+**, **Flask** — бекенд та веб-інтерфейс
-- **Scrapling** (`scrapling[fetchers]`) — рендеринг сторінок та парсинг
-- **SQLite** — зберігання матеріалів, постачальників, проєктів, історії цін
-- **rapidfuzz** — нечіткий матчинг назв товарів
-- **pandas** + **openpyxl** / **xlrd** — імпорт кошторисів і експорт в Excel
-- Ванільний HTML/CSS/JS у `templates/` та `static/` (без фронтенд-фреймворку)
+## Installation & First Launch
 
-## Встановлення
+1. Put the `PriceScout` folder anywhere on your computer.
+2. Double-click **`START.bat`**.
+3. The first launch takes **5–10 minutes** — it installs all components automatically. A black console window will show progress. Do not close it.
+4. When ready, your browser opens at **http://localhost:5000** automatically.
+5. Every launch after the first takes just a few seconds.
 
-```bash
-# 1. Створити та активувати віртуальне середовище
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+> **To stop the app:** simply close the black console window.
 
-# 2. Встановити залежності
-pip install -r requirements.txt
+---
 
-# 3. Встановити браузери для Scrapling
-scrapling install
-```
+## The Interface at a Glance
 
-На Windows усі ці кроки виконує `START.bat` автоматично під час першого запуску.
+The navigation bar across the top has six panels:
 
-## Запуск
-
-```bash
-python app.py
-```
-
-Застосунок підніметься на `http://localhost:5000`. База даних `pricescout.db`
-створюється автоматично при першому запуску (порожня).
-
-### Змінні середовища
-
-Налаштовуються через файл `.env` у корені проєкту:
-
-| Змінна | За замовч. | Призначення |
+| Panel | Ukrainian label | What it does |
 |---|---|---|
-| `PORT` | `5000` | Порт веб-сервера |
-| `MAX_PARALLEL_ITEMS` | `10` | Максимум товарів, що обробляються одночасно |
-| `SKIP_STALE_DAYS` | `30` | Скільки днів результат «не знайдено» вважається актуальним |
-| `MAX_INNER_WORKERS` | `8` | Паралельних постачальників на один товар |
-| `MAX_INNER_WORKERS_DISCOVERY` | `10` | Те саме для discovery-режиму |
+| Import | Імпорт кошторису | Load an АВК-5 estimate file to populate your materials list |
+| Materials | База матеріалів | Browse, search, and manage all saved materials |
+| Monitoring | Моніторинг | Run price searches — single item or full batch |
+| Results | Результати | View prices found in the last run |
+| Availability | Наявність | Matrix showing which suppliers carry which materials |
+| Projects | Проєкти | Group materials by project, compare totals to estimate prices |
+| Exports | Експорти | Download previously saved Excel files |
 
-## Використання
+---
 
-1. **Імпорт кошторису** — у вкладці «Імпорт кошторису» завантажте файл АВК-5,
-   перегляньте знайдені позиції та додайте потрібні до бази матеріалів.
-2. **Моніторинг** — у вкладці «Моніторинг» оберіть постачальників, кількість
-   товарів і паралельність, запустіть чергу. Прогрес відображається в лог-панелі.
-3. **Discovery** — для першого повного перебору запустіть автономний скрипт:
-   ```bash
-   python discover.py [--limit N] [--workers N] [--suppliers id1,id2]
-   ```
-   Після discovery звичайні запуски автоматично пропускають постачальників,
-   де товар уже не знайдено.
-4. **Експорт** — у вкладці «Експорти» згенеруйте прайс-матрицю або звіт по
-   проєкту; готові файли зберігаються в каталозі `exports/`.
+## Step-by-Step: From Estimate to Prices
 
-## Структура проєкту
+### Step 1 — Import your estimate
+
+1. Click **Імпорт кошторису** in the top navigation.
+2. Click **Обрати файл** and select your АВК-5 file (`.xls` or `.xlsx`).
+3. Click **Завантажити та розпізнати**.
+4. PriceScout extracts all construction materials, skipping labour costs, services, and items not sold in retail stores (fuel, sensors, industrial chemicals, etc.).
+5. Review the list. The counts at the top show how many materials were found and how many are selected for import.
+6. Untick anything you don't want, then click **Імпортувати вибране**.
+
+All imported materials are saved in the **База матеріалів** (Materials database) and persist between sessions.
+
+---
+
+### Step 2 — Select materials for monitoring
+
+1. Click **Моніторинг** in the navigation.
+2. The **Черга** (Queue) tab shows your saved materials. Tick the ones you want to price-check.
+3. Use the search box to find a specific material quickly.
+4. Use **Обрати всі** / **Зняти всі** to select or clear the whole list in one click.
+
+**Choosing how many to run at once:**
+
+- **К-сть товарів** — run all selected materials, or just the first 5 / 10 / 20 / 50 (useful for a quick test).
+- **Паралельно** — how many materials are searched at the same time. Higher numbers are faster but use more bandwidth. Default is 5.
+
+---
+
+### Step 3 — Choose suppliers
+
+In the **Черга** tab, a supplier list appears below the materials. All 13 suppliers are ticked by default. Untick any you want to skip.
+
+**The 13 suppliers:**
+Епіцентр К, АРС, Будівельний Двір, КУБ, Вен Буд, Будпостач, М2, Віста, Мегатрейд СМ, Будія, ТеплоДiм, Prom.ua, OLX.
+
+> Prom.ua and OLX are marketplaces with broad coverage but lower data quality — useful for hard-to-find items, but results may need review.
+
+---
+
+### Step 4 — Run the search
+
+Click **▶ Запустити** (Run). The progress bar and live log appear immediately. Each material is checked against all selected suppliers in parallel.
+
+**During the run:**
+- The log stream shows each step in real time.
+- The **X / N матеріалів** counter at the top tracks how many are done.
+- If you reload the page, the run continues in the background and the UI reconnects automatically.
+
+**To stop early:** click **◼ Зупинити**. In-flight requests to suppliers finish naturally before the run ends — no data is lost. The button shows a spinner while draining.
+
+---
+
+### Step 5 — Review results
+
+When the run finishes, PriceScout switches automatically to the **Результати** tab.
+
+The results table shows:
+- Material name
+- Supplier name with a link to the product page
+- Price found
+- Total price (price × quantity from your estimate)
+
+Results from the last run are saved to disk (`data/last_run.json`) and reload on the next app start.
+
+**Editing a result:** click the price cell to type a corrected price or add a comment. Your edit is saved and persists across runs.
+
+**Sorting and filtering:** click any column header to sort. Use the filter boxes at the top to narrow by material or supplier.
+
+---
+
+### Step 6 — Export to Excel
+
+Click **📥 Завантажити Excel** in the Results tab.
+
+The Excel file includes:
+- One row per supplier result, grouped by material
+- 🥇🥈🥉 medal icons on the top-3 cheapest prices per material
+- Estimate price and quantity columns (if imported from АВК-5)
+- Manual price corrections and comments
+- A footer with the run date and total count
+
+All exported files are listed in the **Експорти** panel for re-download.
+
+---
+
+## Running a Single-Item Search
+
+For a quick one-off search without going through the batch queue:
+
+1. Go to **Моніторинг → Один матеріал**.
+2. Type the material name in the search field (e.g. `Цегла М100`).
+3. Choose suppliers and click **▶ Шукати**.
+4. Results appear in the log below and are added to the Results tab when done.
+
+---
+
+## Availability Matrix
+
+The **Наявність** panel shows which supplier carries which material, based on all past runs. Useful for deciding which suppliers to bother including when you know certain items are rare.
+
+Click **Запустити Discovery** to run a full scan — this checks every supplier for every item regardless of cache, rebuilding the availability matrix from scratch. Run it once after your first import; normal runs then skip suppliers known not to carry a given item.
+
+---
+
+## Projects
+
+The **Проєкти** panel lets you group materials into named projects (matching your АВК-5 estimates) and see a summary comparing scraped prices against estimate prices.
+
+1. Click **+ Новий проєкт** and give it a name.
+2. Click the project to open it, then add materials from your list.
+3. The summary tab shows total scraped cost vs. total estimate cost.
+4. Export the comparison as Excel with **📥 Експорт**.
+
+---
+
+## Troubleshooting
+
+**"Python not found"**
+Python is not installed or the "Add python.exe to PATH" box was not ticked. Reinstall Python from [python.org](https://www.python.org/downloads/), tick the box, and run START.bat again.
+
+**First launch is taking very long**
+Normal — downloading components and a browser engine takes 5–10 minutes depending on your connection. Just wait; don't close the window.
+
+**"Could not install dependencies"**
+Check your internet connection and run START.bat again. If the problem persists, delete the `.venv` folder and try again.
+
+**http://localhost:5000 doesn't open**
+Wait 10–15 seconds after the console says "Starting PriceScout…" then open the address manually in your browser. Make sure the console window is still open.
+
+**Prices not found / search not working**
+Delete `.venv\.setup_done` inside the PriceScout folder and run START.bat — this forces a clean reinstall of all scraping components.
+
+**The run looks stuck**
+The log stream continues as long as requests are in flight. If nothing changes for 5+ minutes, close the console window, restart START.bat, and the UI will reconnect to confirm the run has ended.
+
+---
+
+## Environment Variables (Advanced)
+
+Create a `.env` file in the PriceScout folder to override defaults:
 
 ```
-PriceScout/
-├── app.py                      # Flask app factory, точка входу
-├── core/
-│   ├── core.py                 # Спільний стан, константи, хелпери
-│   ├── runner.py               # Оркестратор запуску скрейпінгу (ThreadPool)
-│   └── item_db.py              # SQLite-шар: матеріали, постачальники, проєкти, історія
-├── matching/
-│   ├── matcher.py              # Нечіткий матчинг назв (rapidfuzz, синоніми)
-│   ├── monitorable.py          # Визначення, чи товар продається в роздріб
-│   └── category_routing.py     # Маршрутизація категорій АВК-5 → постачальники
-├── parsers/
-│   └── kostoris_parser.py      # Парсер кошторисів АВК-5 (.xls/.xlsx)
-├── suppliers.py                # Реєстр 13 постачальників
-├── search_label_converter.py   # Перетворення назв у пошукові запити
-├── discover.py                 # CLI-скрипт повного discovery-перебору
-├── routes/                     # Flask-блупринти (scrape, items, exports, kostoris, projects)
-├── scrapers/                   # Скрейпери постачальників + база на Scrapling
-├── templates/ & static/        # Веб-інтерфейс (HTML/CSS/JS, без фреймворку)
-├── tests/                      # Pytest-тести
-├── requirements.txt
-├── START.bat                   # Запуск на Windows у один клік
-└── ЯК ЗАПУСТИТИ.txt             # Інструкція для користувача
+PORT=5000                  # Web server port
+MAX_PARALLEL_ITEMS=10      # Max concurrent items in a batch
+MAX_INNER_WORKERS=8        # Parallel supplier fetches per item
+MAX_INNER_WORKERS_DISCOVERY=10
+SKIP_STALE_DAYS=30         # Days before "not found" results expire
 ```
 
-### Додавання нового постачальника
-
-1. Створити `scrapers/<id>.py` з функцією `scrape(supplier, label, log, saved_url=None)`.
-2. Додати рядок у `SUPPLIER_REGISTRY` в `suppliers.py`.
-3. За потреби — налаштувати маршрутизацію в `category_routing.py`.
-
-## Тестування
-
-```bash
-pip install pytest
-python -m pytest tests/ -v
-```
-
-Тести покривають нормалізацію та скоринг матчера, парсинг цін, спрощення й
-варіації пошукових запитів, а також контроли пакетного запуску.
-
-## Примітки
-
-- Файли `pricescout.db`, `last_run.json`, `last_import.json`, каталоги `exports/`
-  та `debug/` генеруються під час роботи і виключені з git (`.gitignore`).
-- Історію змін та деталі реалізації пошуку дивіться у `CHANGES.md`.
+These only take effect after restarting START.bat.
