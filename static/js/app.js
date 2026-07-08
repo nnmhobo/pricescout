@@ -232,6 +232,7 @@
             await new Promise(r => setTimeout(r, 1500));
             const s = await fetch('/api/status?log_offset=' + lastLogLen).then(r => r.json());
             updateDot(s);
+            updateRunBadges(s);
             if (s.log && s.log.length) appendBatchLog(s.log);
             if (s.total_items) updateBatchProgress(s.done_items ?? 0, s.total_items, s.batch_started_at);
             lastLogLen = s.log_total ?? (lastLogLen + (s.log || []).length);
@@ -342,6 +343,22 @@
   }
 
   // ── Poll ─────────────────────────────────────────────────────
+  // Mirror the run-label / last-run date chips from an /api/status payload.
+  // poll() does this inline for single runs; the batch poll loops call this
+  // so the Results-tab badges and the sidebar "Останній запуск" don't keep
+  // showing the previous run until a page refresh.
+  function updateRunBadges(d) {
+    if (d.last_run) {
+      document.getElementById('last-run').textContent   = 'Останній запуск: ' + d.last_run;
+      document.getElementById('badge-date').textContent = d.last_run;
+      document.getElementById('log-sub').textContent    = d.last_run;
+    }
+    if (d.label) {
+      const bl = document.getElementById('badge-label');
+      bl.textContent = d.label; bl.style.display = '';
+    }
+  }
+
   function poll() {
     fetch('/api/status').then(r => r.json()).then(d => {
       renderLog(d.log);
@@ -1353,6 +1370,8 @@
       // The backend log grows past 100 lines on big batches, so slicing
       // a capped response client-side used to freeze the log view.
       const s = await fetch('/api/status?log_offset=' + lastLogLen).then(r => r.json());
+      updateDot(s);
+      updateRunBadges(s);
       appendBatchLog(s.log);
       if (s.total_items) { lastTotal = s.total_items; updateBatchProgress(s.done_items ?? 0, s.total_items, s.batch_started_at); }
       lastLogLen = s.log_total ?? (lastLogLen + s.log.length);

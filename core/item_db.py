@@ -44,7 +44,7 @@ def _migrate(conn):
     against an existing DB would pointlessly rewrite every row on every
     startup.
     """
-    from matching.monitorable import is_monitorable
+    from matching.monitorable import is_monitorable, MONITOR_ALL
     cols = {r[1] for r in conn.execute("PRAGMA table_info(items)").fetchall()}
     monitorable_freshly_added = "monitorable" not in cols
     if monitorable_freshly_added:
@@ -224,6 +224,32 @@ def _migrate(conn):
 
         conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '3')"
+        )
+
+    # ── MONITOR_ALL_ITEMS mode sync (TEMPORARY, customer request 2026-07) ──
+    # Keeps existing rows consistent with the flag in matching/monitorable.py.
+    # Runs only when the mode CHANGES (tracked in settings), not on every
+    # startup:
+    #   'all'      → force monitorable=1 on every item
+    #   'filtered' → recompute from labels via the SKIP_KW blocklist
+    mode = "all" if MONITOR_ALL else "filtered"
+    cur = conn.execute(
+        "SELECT value FROM settings WHERE key='monitor_all_mode'"
+    ).fetchone()
+    if cur is None or cur[0] != mode:
+        if MONITOR_ALL:
+            conn.execute("UPDATE items SET monitorable=1")
+        else:
+            rows = conn.execute("SELECT id, label FROM items").fetchall()
+            updates = [
+                (1 if is_monitorable(label or "") else 0, item_id)
+                for item_id, label in rows
+            ]
+            if updates:
+                conn.executemany("UPDATE items SET monitorable=? WHERE id=?", updates)
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('monitor_all_mode', ?)",
+            (mode,),
         )
 
 
@@ -492,22 +518,24 @@ def delete_item(item_id: str):
 
 def update_supplier_entry(item_id: str, supplier_id: str,
                           url: str | None, found: bool, price: float | None):
-    """Persist a fresh scrape result. Preserves any existing manual_price
-    / comment override so the user's hand edits aren't wiped on the next run.
+    """Persist a fresh scrape result. Single UPSERT that never touches
+    manual_price / comment, so the user's hand edits survive re-scrapes AND
+    can't be clobbered by an in-flight scrape write (the old
+    SELECT-then-REPLACE had a lost-update window when the user edited an
+    override while a batch was running).
     """
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     with get_conn() as conn:
-        existing = conn.execute(
-            "SELECT manual_price, comment FROM supplier_entries WHERE item_id=? AND supplier_id=?",
-            (item_id, supplier_id),
-        ).fetchone()
-        manual_price = existing["manual_price"] if existing else None
-        comment = existing["comment"] if existing else None
         conn.execute("""
-            INSERT OR REPLACE INTO supplier_entries
-                (item_id, supplier_id, url, found, last_checked, last_price, manual_price, comment)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (item_id, supplier_id, url, int(found), now, price, manual_price, comment))
+            INSERT INTO supplier_entries
+                (item_id, supplier_id, url, found, last_checked, last_price)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(item_id, supplier_id) DO UPDATE SET
+                url          = excluded.url,
+                found        = excluded.found,
+                last_checked = excluded.last_checked,
+                last_price   = excluded.last_price
+        """, (item_id, supplier_id, url, int(found), now, price))
         if found and price:
             conn.execute(
                 "INSERT INTO price_history (item_id, supplier_id, price, checked_at) VALUES (?, ?, ?, ?)",

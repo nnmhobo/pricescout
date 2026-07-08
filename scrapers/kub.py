@@ -26,8 +26,15 @@ CARD_SELECTOR = ".product-item"
 TITLE_SELECTOR = ".name"
 PRICE_SELECTOR = ".price"
 
-# Price pattern for KUB: "1263 грн." or "622 грн."
-_PRICE_RE = re.compile(r'(\d[\d\s]*(?:[.,]\d{1,2})?)\s*грн\.?', re.IGNORECASE)
+# Price pattern for KUB: "1263 грн." or "1 263.50 грн.".
+# Strict integer part: a plain digit run OR 1-3 digits followed by groups of
+# exactly three. Rejects malformed "1 023 67" which the old greedy [\d\s]*
+# pattern parsed as 102367 (same hardening as _PRICE_LINE_RE in
+# _scrapling_base.py).
+_PRICE_RE = re.compile(
+    r'((?:\d{1,3}(?:\s\d{3})+|\d+)(?:[.,]\d{1,2})?)\s*грн\.?',
+    re.IGNORECASE,
+)
 
 # KUB is an SPA — search results render via AJAX. Use the shared cache-aware
 # fetcher with an extended wait so the SPA has time to populate the DOM.

@@ -1,6 +1,8 @@
 # PriceScout — Technical Overview (Agentic Coding Reference)
 
-This document is a complete coding reference for PriceScout. It covers every file, all data flows, the full API surface, database schema, and all gotchas to know before editing the codebase. Read this before touching any file.
+This document is the coding reference for PriceScout. It covers every module, all data flows, the full API surface, the database schema, and the gotchas to know before editing the codebase. Read this before touching any file.
+
+> **Verified against code on 2026-07-04.** If you change behavior described here, update this file in the same session. Known drift traps are marked ⚠ throughout.
 
 ---
 
@@ -12,7 +14,7 @@ PriceScout is a local Flask web app (Windows, single-user) that:
 2. Searches 13 Ukrainian supplier websites for each material
 3. Shows a side-by-side price comparison table and exports to Excel
 
-All scraping is done with **Scrapling** (HTTP fetcher + optional Chromium via Scrapling's DynamicFetcher). There is **no Claude API call** in the scraping pipeline. Fuzzy matching of product names uses **rapidfuzz**.
+All scraping is done with **Scrapling** (HTTP fetcher + optional Chromium via Scrapling's Dynamic/Stealthy fetchers). There is **no Claude API call** in the scraping pipeline. Fuzzy matching of product names uses **rapidfuzz**.
 
 ---
 
@@ -21,46 +23,48 @@ All scraping is done with **Scrapling** (HTTP fetcher + optional Chromium via Sc
 ```
 pricescout/
 │
-├── app.py                  # Flask factory + index route
-├── START.bat               # Windows launcher (venv + deps + scrapling install)
-├── requirements.txt        # pip deps
+├── app.py                  # Flask app + index route (no factory function; module-level `app`)
+├── START.bat               # Windows launcher (venv + deps + `scrapling install`)
+├── requirements.txt        # flask, scrapling[fetchers], lxml, xlrd, pandas, openpyxl, python-dotenv, rapidfuzz, requests
 ├── .env                    # (not committed) env overrides
 ├── pricescout.db           # SQLite database (WAL mode)
 │
 ├── core/
-│   ├── core.py             # Shared in-memory state dict, log(), save/load_last_run()
+│   ├── core.py             # Shared in-memory state dict, log(), save/load_last_run(), normalize_label()
 │   ├── runner.py           # Scrape orchestrator — ThreadPoolExecutor fan-out
 │   ├── item_db.py          # All SQLite access (init_db, CRUD, migrations)
-│   └── suppliers.py        # SUPPLIER_REGISTRY + build_suppliers() factory
+│   └── suppliers.py        # SUPPLIER_REGISTRY + build_suppliers() → SUPPLIERS
 │
 ├── routes/
 │   ├── scrape.py           # /api/scrape, /api/scrape/batch, /api/stop, /api/status, /api/results, /api/discover, /api/config
-│   ├── items.py            # /api/items CRUD, /api/availability, /api/price-history
+│   ├── items.py            # /api/items CRUD, /api/availability, /api/items/<id>/price-history
 │   ├── exports.py          # /api/export/excel, /api/exports, /api/export/price-matrix
 │   ├── kostoris.py         # /api/kostoris/parse, /api/kostoris/import, /api/kostoris/last
-│   └── projects.py         # /api/projects CRUD + /api/projects/<id>/summary + export
+│   └── projects.py         # /api/projects CRUD + summary + export
 │
 ├── scrapers/
-│   ├── _scrapling_base.py  # Shared fetch helpers, price parser, fuzzy pick helpers
-│   ├── epicentr.py         # Епіцентр К
-│   ├── ars.py              # АРС
-│   ├── buddvir.py          # Будівельний Двір
-│   ├── kub.py              # КУБ
-│   ├── venbud.py           # Вен Буд
-│   ├── budpostach.py       # Будпостач
-│   ├── m2.py               # М2
-│   ├── vista.py            # Віста
-│   ├── megatrade.py        # Мегатрейд СМ
-│   ├── budia.py            # Будія
-│   ├── teplodim.py         # ТеплоДiм (HVAC specialist)
-│   ├── prom.py             # Prom.ua (marketplace)
-│   └── olx.py              # OLX (classifieds)
+│   ├── _scrapling_base.py  # Fetch helpers + cache, price parser, SiteConfig, search_and_extract, text_based_extract
+│   ├── query_variations.py # generate_variations() — search query alternatives (UA→RU, synonyms, brand codes)
+│   ├── query_simplifier.py # simplify_label() — shortens spec-style labels ("Болти ... 12 мм" → "Болти 12")
+│   ├── epicentr.py         # Епіцентр К     — custom, FAST
+│   ├── ars.py              # АРС            — custom, STEALTH
+│   ├── buddvir.py          # Будівельний Двір — text_based_extract, FAST
+│   ├── kub.py              # КУБ            — custom, DYNAMIC (SPA, wait_ms=10000, filter_name= param)
+│   ├── venbud.py           # Вен Буд        — custom, DYNAMIC
+│   ├── budpostach.py       # Будпостач      — text_based_extract, FAST
+│   ├── m2.py               # М2             — search_and_extract, FAST (+ single-word retry fallback)
+│   ├── vista.py            # Віста          — search_and_extract, FAST
+│   ├── megatrade.py        # Мегатрейд СМ   — text_based_extract, FAST
+│   ├── budia.py            # Будія          — text_based_extract, FAST
+│   ├── teplodim.py         # ТеплоДiм       — search_and_extract, FAST (HVAC specialist)
+│   ├── prom.py             # Prom.ua        — search_and_extract, FAST (marketplace)
+│   └── olx.py              # OLX            — search_and_extract, FAST (classifieds)
 │
 ├── matching/
-│   ├── matcher.py          # Fuzzy matcher (rapidfuzz, Cyrillic normalization)
+│   ├── matcher.py          # Fuzzy matcher (rapidfuzz, transliteration, synonyms)
 │   ├── monitorable.py      # is_monitorable(label) — keyword blocklist
-│   ├── category_routing.py # Category → supplier ID list mapping
-│   └── search_label_converter.py  # Converts display labels to search queries
+│   ├── category_routing.py # Category → supplier ID list mapping + label-keyword override
+│   └── search_label_converter.py  # convert_label() + convert_all_items() CLI to fill items.search_label
 │
 ├── parsers/
 │   └── kostoris_parser.py  # АВК-5 Excel parser → list of material dicts
@@ -69,29 +73,18 @@ pricescout/
 │   └── index.html          # Single-page app shell (Jinja2, all panels inline)
 │
 ├── static/
-│   ├── css/app.css         # All styles (dark/light mode via data-theme attr)
-│   └── js/app.js           # All frontend logic (~3000 lines, vanilla JS)
+│   ├── css/app.css         # All styles (dark/light mode via [data-theme] attr)
+│   └── js/app.js           # All frontend logic (~2000 lines, vanilla JS, top-level script)
 │
 ├── data/
 │   ├── last_run.json       # Persisted results from most recent scrape run
-│   └── last_import.json    # Persisted last кошторис import data
+│   └── last_import.json    # Persisted last кошторис parse result
 │
 ├── exports/                # Generated Excel files (served by /api/exports/<filename>)
-├── debug/                  # HTML snapshots from failed fetches (dev aid)
+├── debug/                  # HTML snapshots dir (created at startup, dev aid)
 │
-├── tests/
-│   ├── test_matcher.py
-│   ├── test_price_parsing.py
-│   ├── test_query_simplifier.py
-│   ├── test_query_variations.py
-│   ├── test_result_overrides.py
-│   ├── test_result_sort.py
-│   ├── test_batch_controls.py
-│   ├── test_safe_export_path.py
-│   ├── test_session_cache.py
-│   └── test_excel_medals.py
-│
-└── scripts/                # One-off discovery / probe scripts (not used in production)
+├── tests/                  # 10 test files, all pure-logic, no network (see §16)
+└── scripts/                # probe2.py, probe3_elektro.py, probe_new_sites.py — one-off discovery scripts
 ```
 
 ---
@@ -100,33 +93,33 @@ pricescout/
 
 **File:** `pricescout.db` — SQLite, WAL mode, `PRAGMA foreign_keys=ON`.
 
-All access goes through `core/item_db.py` which uses a `@contextmanager get_conn()` helper that auto-commits or auto-rolls-back.
+All access goes through `core/item_db.py`, which uses a `@contextmanager get_conn()` helper that auto-commits or auto-rolls-back and opens a **new connection per call** (`check_same_thread=False`).
 
 ### `items`
 | Column | Type | Notes |
 |---|---|---|
-| id | TEXT PK | UUID generated at insert |
-| label | TEXT UNIQUE | Material name (display form) |
-| created | TEXT | ISO date string |
+| id | TEXT PK | ⚠ NOT a UUID. `add_item`: `datetime.now().strftime("%Y%m%d%H%M%S%f")`. `batch_add_items`: `"%Y%m%d%H%M%S" + f"{idx:06d}"` |
+| label | TEXT UNIQUE | Material name (display form). Dedupe key for imports. |
+| created | TEXT | ISO date `YYYY-MM-DD` |
 | source | TEXT | `'manual'` or `'kostoris'` |
-| avk_code | TEXT | АВК-5 resource code (e.g. `С111-2`) |
-| category | TEXT | Derived from code; used for supplier routing |
+| avk_code | TEXT | АВК-5 resource code (e.g. `С111-2`). `add_item` rejects duplicates by code. |
+| category | TEXT | Derived from code by the parser; used for supplier routing |
 | qty | REAL | Quantity from estimate |
 | unit | TEXT | Unit of measure (м², кг, шт, …) |
 | estimate_unit_price | REAL | Unit price from кошторис |
-| monitorable | INT | 1=yes, 0=skip (set by `is_monitorable()`) |
-| manual_price | REAL | User-set override price (rarely used at item level) |
-| search_label | TEXT | Alternative search query override |
-| project_id | TEXT | FK to `projects.id` (nullable) |
+| monitorable | INT | 1=yes, 0=skip (set by `is_monitorable()` at insert) |
+| manual_price | REAL | User-set override price (item level, rarely used) |
+| search_label | TEXT | Shorter search query override. ⚠ NOT settable via PATCH /api/items — only via `matching/search_label_converter.py` CLI or direct DB write. |
+| project_id | TEXT | ⚠ Legacy column. The `project_items` junction table is the source of truth; routes only write the junction. |
 
 ### `supplier_entries`
 | Column | Type | Notes |
 |---|---|---|
-| item_id | TEXT | FK → items.id CASCADE DELETE |
-| supplier_id | TEXT | e.g. `'epicentr'`, `'kub'` |
+| item_id | TEXT | PK part; FK → items.id ON DELETE CASCADE |
+| supplier_id | TEXT | PK part; e.g. `'epicentr'`, `'kub'` |
 | url | TEXT | Last known product URL |
 | found | INT | 1=product exists on this supplier, 0=not found |
-| last_checked | TEXT | ISO datetime of last scrape |
+| last_checked | TEXT | `YYYY-MM-DD HH:MM` |
 | last_price | REAL | Price from last scrape |
 | manual_price | REAL | User override price for this result |
 | comment | TEXT | User note for this result |
@@ -134,465 +127,455 @@ All access goes through `core/item_db.py` which uses a `@contextmanager get_conn
 ### `projects`
 | Column | Type |
 |---|---|
-| id | TEXT PK |
-| name | TEXT |
+| id | TEXT PK (timestamp string) |
+| name | TEXT NOT NULL |
 | created | TEXT |
+| description | TEXT |
+| avk_file | TEXT |
 
 ### `project_items`
 | Column | Type |
 |---|---|
-| project_id | TEXT FK |
-| item_id | TEXT FK |
+| project_id | TEXT, PK part |
+| item_id | TEXT, PK part |
+| added | TEXT (ISO datetime) |
 
 ### `price_history`
 | Column | Type | Notes |
 |---|---|---|
 | id | INTEGER PK AUTOINCREMENT | |
-| item_id | TEXT | |
+| item_id | TEXT | FK → items.id ON DELETE CASCADE (added by schema v3) |
 | supplier_id | TEXT | |
 | price | REAL | |
-| url | TEXT | |
-| checked_at | TEXT | ISO datetime |
+| checked_at | TEXT | `YYYY-MM-DD HH:MM` |
+
+⚠ There is **no `url` column** in `price_history`. A row is inserted on every scrape where `found and price` — even if the price is unchanged.
 
 ### `settings`
-| Column | Type |
-|---|---|
-| key | TEXT PK |
-| value | TEXT |
+Key-value store (`key TEXT PK, value TEXT`). Used for one-time migration flags: `monitorable_version` (=2), `schema_version` (=3).
 
-Used for `schema_version` tracking.
-
-**Schema version:** managed by `_migrate(conn)` in `item_db.py`. It checks `PRAGMA table_info` and adds columns if missing. The migration is idempotent — safe to run on every startup.
+**Migrations:** `_migrate(conn)` in `item_db.py` runs on every `init_db()` (startup). Column additions are idempotent (`PRAGMA table_info` check). One-time data migrations (monitorable recompute v2; indexes + price_history FK rebuild + `dd.mm.yyyy`→ISO date normalization v3) are guarded by the `settings` flags. Safe to run repeatedly.
 
 ---
 
 ## 4. In-Memory State
 
-### `core.state` (dict, lives in `core/core.py`)
+### `core.state` (dict in `core/core.py`)
 
-Created once at module import by `_make_state()`. **Resets on server restart.** Persists across page reloads.
+Created at module import by `_make_state()`, which pre-loads `results`/`label`/`last_run` from `data/last_run.json`. **Resets on server restart** (except the JSON-loaded keys). Persists across page reloads.
 
 | Key | Type | Meaning |
 |---|---|---|
 | `running` | bool | True while a scrape is in progress |
-| `stop_requested` | bool | Set by `POST /api/stop`; checked between futures |
-| `log` | list[str] | Full log of the current/last run |
+| `stop_requested` | bool | Set by `POST /api/stop`; checked cooperatively in the runner |
+| `log` | list[str] | Full log of the current/last run (cleared at each batch start) |
 | `results` | list[dict] | Flat result list from current/last run |
-| `last_run` | str | ISO datetime of last completed run |
+| `last_run` | str | `dd.mm.YYYY HH:MM` of last completed run |
 | `error` | str\|None | Error message if the run crashed |
-| `label` | str | Item label (single-item runs) |
+| `label` | str | Run label, e.g. `"Черга (12 матеріалів)"` |
 | `parallel_items` | int\|None | Parallelism used for current batch |
-| `limit` | int\|None | Item count cap used for current batch |
-| `total_items` | int\|None | Total items in current batch |
-| `batch_started_at` | str\|None | ISO datetime when batch started |
+| `limit` | int\|None | Effective item count of current batch |
+| `total_items` | int\|None | Total items requested (before limit) |
+| `batch_started_at` | str\|None | ISO datetime; ⚠ not present in `_make_state()` — added by `_run_batch()` at runtime, so use `.get()` |
 
-### `core.runner.item_states` (dict, lives in `core/runner.py`)
+### `core.runner.item_states` (dict in `core/runner.py`)
 
-Per-item state for batch runs. Keys are `item_id` strings.
+Per-item state for the current batch. Keys are `item_id` strings. Cleared and repopulated at every batch start.
 
 ```python
-item_states[item_id] = {
-    "log":     [],       # per-item log lines
-    "results": [],       # per-item scrape results
-    "done":    False,    # True when all suppliers for this item have been tried
-    "error":   None,
-}
+item_states[item_id] = {"log": [], "results": [], "done": False, "error": None}
 ```
 
-Both dicts are **not thread-safe** in the strictest sense but Flask runs with `threaded=True` and Python's GIL protects simple attribute assignments. Do not replace these dicts — mutate them in place.
+### `core.runner._session_cache`
+
+`{(item_id, frozenset(supplier_ids)): [results]}` — ⚠ **cleared at the start of every batch** (`_run_batch` calls `_session_cache.clear()`), so it only dedupes repeated item IDs *within one run*, not across runs. Not populated in discovery mode. The key includes the active supplier set so changing suppliers never returns stale results.
+
+### Thread-safety notes (do not "fix" silently)
+
+- Both `state` and `item_states` are plain dicts mutated from worker threads; the GIL makes single-key writes safe. **Mutate in place; never rebind these names.**
+- ⚠ Known race #1: `/api/scrape` and `/api/scrape/batch` check `state["running"]` in the route, but `running=True` is set inside the spawned thread — two fast requests can start overlapping batches.
+- ⚠ Known race #2: `/api/status` iterates `item_states.values()` while `_run_batch` may `clear()`/`update()` it → possible `RuntimeError: dictionary changed size during iteration` on a poll landing mid-reset.
 
 ---
 
 ## 5. API Endpoints
 
-All routes registered as Flask Blueprints. All return JSON.
+All routes are Flask Blueprints registered in `app.py`. All return JSON unless noted.
 
 ### Scrape routes (`routes/scrape.py`)
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/scrape` | Start single-item scrape. Body: `{item_id, label, suppliers:[{id, enabled}]}` |
-| POST | `/api/scrape/batch` | Start batch. Body: `{item_ids:[], suppliers:[], parallel_items?, limit?}` |
-| POST | `/api/stop` | Set `state["stop_requested"] = True`. Returns immediately. |
-| GET | `/api/status` | Poll run status. Optional `?log_offset=N` for incremental logs. Returns full state snapshot including `item_ids`. |
-| POST | `/api/discover` | Full discovery run (all suppliers, ignores SKIP_STALE_DAYS cache). |
-| GET | `/api/config` | Returns `{max_parallel_items, default_parallel_items, skip_stale_days}`. |
-| GET | `/api/results` | Returns `state["results"]` as JSON array. |
-| PATCH | `/api/results/<item_id>/<supplier_id>` | Override price or comment. Body: `{manual_price?, comment?}`. Re-applies all overrides and re-sorts in memory. |
+| POST | `/api/scrape` | Single-item scrape. Body: `{item_id?, label?, suppliers:[{id, enabled}]}`. If `item_id` missing, looks the item up by `label` and **creates it** if not found. Internally runs a batch of one (`parallel_items=1`). |
+| POST | `/api/scrape/batch` | Start batch. Body: `{item_ids:[], suppliers:[{id, enabled}], parallel_items?, limit?}` |
+| POST | `/api/stop` | Sets `state["stop_requested"]=True` if running. Returns immediately. |
+| GET | `/api/status` | Poll run status. Optional `?log_offset=N` → log lines from index N; without it, last 100 lines. |
+| POST | `/api/discover` | Discovery run: all suppliers, ignores SKIP_STALE_DAYS + session cache. Body like batch (no parallel/limit); forces `parallel_items=1`. |
+| GET | `/api/config` | `{max_parallel_items, default_parallel_items, skip_stale_days}` |
+| GET | `/api/results` | `state["results"]` as JSON array |
+| PATCH | `/api/results/<item_id>/<supplier_id>` | Persist manual price/comment override. Body: `{manual_price?, comment?}` (null/"" clears). Re-applies all overrides to `state["results"]` in memory and re-sorts; returns `{status, result}`. |
 
-**`GET /api/status` response shape:**
+**`GET /api/status` response:**
 ```json
 {
   "running": bool,
   "log": ["[HH:MM:SS] ..."],
   "log_total": int,
-  "count": int,
-  "last_run": "ISO string",
+  "count": int,              // len(state.results)
+  "last_run": "dd.mm.YYYY HH:MM",
   "error": null,
   "label": "...",
-  "parallel_items": int,
-  "limit": int,
-  "total_items": int,
-  "done_items": int,
-  "found_items": int,
+  "parallel_items": int, "limit": int, "total_items": int,
+  "done_items": int,         // items with item_states[id].done == True
+  "found_items": int,        // items with ≥1 result
   "batch_started_at": "ISO string",
-  "item_ids": ["id1", "id2", ...]
+  "item_ids": ["...", ...]   // keys of item_states (frontend queue restore)
 }
 ```
-
-`done_items` = count of items where `item_states[id]["done"] == True`.
-`found_items` = count of items with at least one result.
-`item_ids` = keys of `item_states` (used by frontend to restore queue on page reload).
 
 ### Items routes (`routes/items.py`)
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/items` | All items. Optional `?project_id=` filter. |
-| POST | `/api/items` | Create item. Body: `{label, category?, qty?, unit?, estimate_unit_price?, source?}` |
-| GET | `/api/items/<item_id>` | Single item with supplier entries. |
-| PATCH | `/api/items/<item_id>` | Update item fields (monitorable, qty, unit, etc.). |
-| DELETE | `/api/items/<item_id>` | Delete item (cascades to supplier_entries, project_items, price_history). |
-| GET | `/api/availability` | Full availability matrix: `{items:[...], suppliers:[...], matrix:{item_id:{supplier_id: bool}}}` |
-| GET | `/api/availability/coverage` | Coverage summary per supplier (count of found items). |
-| GET | `/api/items/<item_id>/price-history` | Price history rows for one item, all suppliers. |
+| GET | `/api/items` | All items with their supplier entries. ⚠ No query params — no `project_id` filter exists. |
+| POST | `/api/items` | Create item. Body: `{label}` — ⚠ **only `label` is read**; qty/unit/category etc. are NOT accepted here (they come from кошторис import). |
+| GET | `/api/items/<item_id>` | Single item with supplier entries. 404 if missing. |
+| PATCH | `/api/items/<item_id>` | Update item. ⚠ Allowed fields only: `monitorable`, `manual_price`, `qty`, `unit`, `estimate_unit_price`, `project_id`. `label`, `category`, `search_label` are silently ignored. |
+| DELETE | `/api/items/<item_id>` | Delete (cascades to supplier_entries + price_history). |
+| GET | `/api/availability` | ⚠ Returns `{coverage: {sid: {checked, found}}, items: [{id, label, category, monitorable, suppliers:{sid:{found,last_price,last_checked,...}}}]}` — NOT a `matrix` key. Items list only includes items with ≥1 supplier_entry. |
+| GET | `/api/availability/coverage` | Per-supplier `{sid: {checked, found}}` only. |
+| GET | `/api/items/<item_id>/price-history` | Optional `?supplier_id=`. Returns `{supplier_id: [{price, date}]}` grouped by supplier. |
 
 ### Export routes (`routes/exports.py`)
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/export/excel` | Generate and return Excel file from current `state["results"]`. Saves copy to `exports/`. |
-| GET | `/api/exports` | List files in `exports/` dir. |
-| GET | `/api/exports/<filename>` | Download a saved export file. |
+| GET | `/api/export/excel` | Build Excel from current `state["results"]`; saves a copy to `exports/` and streams it. 400 if no results. |
+| GET | `/api/exports` | List saved exports: `[{filename, size_kb, created}]`. |
+| GET | `/api/exports/<filename>` | Download a saved export. |
 | DELETE | `/api/exports/<filename>` | Delete an export file. |
-| GET | `/api/export/price-matrix` | Price matrix export (all items × all suppliers, last prices from DB). |
+| GET | `/api/export/price-matrix` | All items × all suppliers matrix from DB `last_price` (+ min/max/spread columns, min-price cells highlighted). 400 if no availability data. |
+
+`_safe_export_path(filename)` strips characters, resolves inside `EXPORTS_DIR`, and rejects escapes — use it for any filename param.
 
 ### Kostoris routes (`routes/kostoris.py`)
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/kostoris/parse` | Accepts multipart file upload. Returns parsed material list. Does NOT save to DB. |
-| POST | `/api/kostoris/import` | Saves selected items from a parse result into DB. Body: `{items:[...], project_id?}` |
-| GET | `/api/kostoris/last` | Returns `data/last_import.json` (last parse result for UI restore). |
+| POST | `/api/kostoris/parse` | Multipart upload (`file`). Validates extension (`.xls`/`.xlsx`) and size (1 KB–20 MB), writes to a **temp file**, calls `parsers.kostoris_parser.parse(path)`. Returns `{total, retail, items, filename}` and saves it to `data/last_import.json`. Does NOT touch the DB. |
+| POST | `/api/kostoris/import` | Body: `{items: [{name, code?, category?, qty?, unit?, unit_price?}], project_id?}` (legacy alt: `{names: [...]}`). Maps to DB fields (`name`→label, `code`→avk_code, `unit_price`→estimate_unit_price) and bulk-inserts via `batch_add_items` (dedupe by existing label). Returns `{added, skipped, project_id}`. |
+| GET | `/api/kostoris/last` | Returns `data/last_import.json` content or `null`. |
 
 ### Projects routes (`routes/projects.py`)
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/projects` | List all projects. |
-| POST | `/api/projects` | Create project. Body: `{name}` |
-| GET | `/api/projects/<id>` | Get project + items. |
-| PATCH | `/api/projects/<id>` | Rename project. |
-| DELETE | `/api/projects/<id>` | Delete project (does not delete items). |
-| GET | `/api/projects/<id>/items` | Items in a project. |
-| POST | `/api/projects/<id>/items` | Add item to project. Body: `{item_id}` |
-| DELETE | `/api/projects/<id>/items/<item_id>` | Remove item from project. |
-| GET | `/api/projects/<id>/summary` | Aggregated cost comparison (scraped vs estimate). |
-| GET | `/api/projects/<id>/export` | Excel export for project. |
+| GET | `/api/projects` | All projects + `item_count`, `items_with_price`. |
+| POST | `/api/projects` | Body: `{name, description?, avk_file?}` |
+| GET | `/api/projects/<id>` | Project + `item_count`. |
+| PATCH | `/api/projects/<id>` | Update `name`/`description`/`avk_file`. |
+| DELETE | `/api/projects/<id>` | Delete project + its junction rows (items survive). |
+| GET | `/api/projects/<id>/items` | Items enriched with `best_price`, `best_supplier`, `total_best`, `total_estimate`, `saving_pct` (honours per-result `manual_price`). |
+| POST | `/api/projects/<id>/items` | Body: `{item_id}` → junction insert. |
+| DELETE | `/api/projects/<id>/items/<item_id>` | Junction delete. |
+| GET | `/api/projects/<id>/summary` | `{project, item_count, items_with_price, total_estimate, total_best, saving, saving_pct}` |
+| GET | `/api/projects/<id>/export` | Excel export: estimate vs best-price comparison per item, one column per supplier. |
 
 ---
 
-## 6. Scraping Pipeline
+## 6. Scraping Pipeline (`core/runner.py`)
 
-### Entry points
+### Entry points (both spawn a daemon thread running `_run_batch`)
 
-- **Single item:** `runner.start_scrape(item_id, active_supplier_ids)` — spawns a daemon thread that calls `_run_single()`.
-- **Batch:** `runner.start_batch(item_ids, active_supplier_ids, parallel_items, limit, discovery_mode)` — spawns a daemon thread that calls `_run_batch()`.
+- `start_scrape(item_id, active_supplier_ids)` — batch of one, `parallel_items=1`.
+- `start_batch(item_ids, active_supplier_ids, parallel_items=None, limit=None, discovery_mode=False)`
+
+There is **no `_run_single()`** — single scrapes are one-item batches.
 
 ### `_run_batch()` flow
 
 ```
-start_batch() → daemon thread → _run_batch():
-  1. Set state["running"] = True, reset item_states
-  2. Apply limit: item_ids = item_ids[:limit] if limit else item_ids
-  3. ThreadPoolExecutor(max_workers=parallel_items) outer pool
-  4. For each item_id (submitted as futures):
-       → _scrape_item(item_id, active_supplier_ids, ...)
-  5. as_completed(futures):
-       - check state["stop_requested"] between futures
-       - mark item_states[id]["done"] = True
-       - append results to state["results"]
-  6. state["running"] = False
-  7. save_last_run(results, ...)
+1. _session_cache.clear()
+2. item_ids = apply_limit(item_ids, limit); workers = clamp_parallel(parallel_items)
+   (discovery_mode with no explicit parallel_items → workers = 1)
+3. state: running=True, stop_requested=False, log=[], batch_started_at, parallel_items,
+   limit=len(item_ids), total_items=<requested count>, label="Черга (N матеріалів)"
+4. item_states.clear() + repopulate for the effective ids
+5. active_suppliers = SUPPLIERS filtered by active_supplier_ids + enabled
+6. Outer ThreadPoolExecutor(max_workers=workers):
+     submit _run_single_item(iid, active_suppliers, discovery_mode) per item
+     (submission loop breaks early if stop_requested)
+7. After pool drains: collect item_states results in item_ids order,
+   state["results"] = sort_results(apply_overrides(run_results))
+   state["last_run"] = now; save_last_run(...)
+8. finally: state["running"] = False
 ```
 
-### `_scrape_item()` flow
+### `_run_single_item()` flow
 
 ```
-_scrape_item(item_id, active_supplier_ids):
-  1. Load item from DB (get_item)
-  2. Determine which suppliers to try:
-       → get_suppliers_for_item(item, active_supplier_ids)
-       → filters by category routing
-       → skips suppliers with found=False checked < SKIP_STALE_DAYS days ago
-  3. ThreadPoolExecutor(max_workers=MAX_INNER_WORKERS) inner pool
-  4. For each supplier: call supplier["scrape"](supplier, label, log, saved_url)
-  5. Collect results, run apply_overrides(), update supplier_entries in DB
+1. Return immediately if stop_requested; load item via get_item()
+2. label = item.search_label or item.label  (display_label stays item.label —
+   results carry the ORIGINAL кошторис label in item_label)
+3. Session-cache hit (non-discovery) → copy results, done=True, return
+4. Routing: get_suppliers_for_item(item, active_ids) → routed subset
+5. Smart skip (non-discovery): drop suppliers whose entry has found=0 and
+   last_checked younger than SKIP_STALE_DAYS (parsed as "%Y-%m-%d %H:%M")
+6. Skip whole item if monitorable=False or routed list empty (cache [] and done)
+7. Re-check stop_requested; inner ThreadPoolExecutor
+   (max_workers = min(len(routed), MAX_INNER_WORKERS[_DISCOVERY]))
+   → _scrape_one_supplier(supplier, label, item, ilog) per supplier
+8. Per result: enrich (item_id, supplier_id, item_label=display_label, qty,
+   unit_estimate, total_price=qty*price) and update_supplier_entry(...);
+   not-found → update_supplier_entry(found=False)
+9. Cache results (non-discovery), done=True
 ```
+
+`sort_results()` orders by `(item_label, supplier)` using a UA-folding sort key (ґ→г, і/ї→и, є→е). `apply_overrides()` splices `manual_price`/`comment` from `supplier_entries` into result rows (`price` replaced, original kept in `original_price`, `total_price` recomputed).
 
 ### Scraper contract
 
-Every file in `scrapers/` must export one function:
+Every scraper module exports:
 
 ```python
 def scrape(
-    supplier: dict,       # {"id": "epicentr", "name": "Епіцентр К", "url": "..."}
-    label: str,           # Material name to search for
-    log: Callable,        # log(msg: str) — writes to item log
-    saved_url: str|None,  # Previously found product URL (fast path)
-) -> tuple[dict|None, str|None]:
-    # Returns: (result_dict_or_None, product_url_or_None)
+    supplier: dict,       # {"id", "name", "url", "enabled", "scrape"}
+    label: str,           # search query (already search_label if set)
+    log: Callable,        # log(msg: str) — per-item logger
+    saved_url: str|None = None,  # previously found product URL (fast path)
+) -> tuple[dict|None, str|None]:   # (result, product_url)
 ```
 
-**Result dict shape:**
+**Result dict shape** (see `_build()` / `_build_result()`):
 ```python
 {
-    "name":         str,   # Product title from site
-    "price":        float,
-    "currency":     "UAH",
-    "unit":         str|None,
-    "brand":        str|None,
-    "sku":          str|None,
-    "specs":        str|None,
-    "supplier":     str,   # supplier["name"]
-    "url":          str|None,
+    "name": str, "price": float, "currency": "UAH",
+    "unit": None, "brand": None,          # currently always None from scrapers
+    "sku": str|None, "specs": None,
+    "supplier": str,                       # supplier display name
+    "url": str|None,
     "date_scraped": "YYYY-MM-DD",
 }
 ```
 
-Return `(None, None)` when the item is not found on that supplier.
-Return `(None, saved_url)` to keep the existing URL but indicate no price today.
+Return `(None, None)` when not found. The runner enriches rows afterwards (see step 8 above); scrapers must not set `item_id`/`item_label`/`qty` themselves.
 
-### `_scrapling_base.py` — shared helpers
+**Saved-URL fast path convention:** if `saved_url` is given, fetch it first; validate that the page still matches the label (`score_title(name, label) >= DEFAULT_THRESHOLD`) and has a price; otherwise fall through to search.
+
+---
+
+## 7. Scrapling Base (`scrapers/_scrapling_base.py`)
+
+### Fetch modes (exact constant names)
+
+| Constant | Value | Fetcher | Use |
+|---|---|---|---|
+| `FETCH_MODE_FAST` | `"fast"` | `scrapling.fetchers.Fetcher` (plain HTTP) | Server-rendered pages. 10–50× faster. |
+| `FETCH_MODE_DYNAMIC` | `"dynamic"` | `DynamicFetcher` (Chromium) | JS-rendered/SPA pages. **Default of `fetch_html`.** |
+| `FETCH_MODE_STEALTH` | `"stealth"` | `StealthyFetcher` (camoufox) | Anti-bot / Cloudflare sites (ars). |
+
+⚠ The constant is `FETCH_MODE_STEALTH` — there is no `FETCH_MODE_STEALTHY`.
+
+### `fetch_html(url, timeout=30, headless=True, wait_ms=5000, mode=FETCH_MODE_DYNAMIC)`
+
+- Thread-safe TTL cache: key `f"{mode}::{url}"`, TTL 300 s, hard cap 500 entries (OrderedDict, oldest evicted).
+- Per-URL `threading.Lock` (double-checked) prevents duplicate concurrent fetches of the same URL; lock dict capped at 2000 (cleared wholesale when full).
+- ⚠ There is **no per-domain rate limiting** — only identical-URL dedupe. Up to `parallel_items` threads can hit one site's search endpoint simultaneously.
+
+### Other helpers
 
 | Function | Purpose |
 |---|---|
-| `fetch_html(url, timeout, mode)` | Thread-safe cached fetch. TTL=300s, max 500 entries. |
-| `normalize_search_query(label)` | Strips units, codes, special chars for search URL. |
-| `parse_price(text)` | Extracts float from "1 234,50 грн" style strings. |
-| `pick_best_card(cards, label, ...)` | Runs fuzzy matching over a list of product cards, returns best hit above threshold. |
-| `score_title(query, title)` | Calls `calculate_match_score` from matcher. |
-| `FETCH_MODE_FAST` / `FETCH_MODE_STEALTHY` / `FETCH_MODE_DYNAMIC` | Constants for fetch strategy. |
+| `parse_price(raw)` | `"1 299,99 грн"` → `1299.99`. Rightmost `.`/`,` = decimal separator; other = thousands. |
+| `normalize_search_query(label)` | Collapse whitespace, drop one trailing `(...)` note. |
+| `score_title(title, label)` | ⚠ Arg order: **(candidate title, query label)**. Delegates to `calculate_match_score(label, title)`. Returns 0..120. |
+| `pick_best_card(cards, label, title_selector=, log_fn=)` | Best card above threshold or None. |
+| `pick_top_cards(cards, label, ..., top_n=5)` | Ranked list; callers fall through when top card lacks price/URL (OLX "Договірна"). |
+| `SiteConfig` | Dataclass: name, domain, search_url_template (`{q}`), card_selectors[], title_selector, price_selectors[], url_selector?, sku_selectors[], sku_text_patterns[], fetch_timeout=45, check_cloudflare=False, wait_ms=5000, fetcher_mode=FETCH_MODE_DYNAMIC. |
+| `search_and_extract(cfg, label, log, saved_url)` | Generic flow: saved-URL fast path (with title validation) → query variations loop → card pick (top-5 fall-through) → optional detail-page SKU fetch. |
+| `text_based_extract(cfg, label, log, saved_url)` | Same skeleton, but falls back to full-page-text parsing: candidate product-name lines (5–120 chars, noise prefixes skipped) + price within 2 lines before / 4 after (`_PRICE_LINE_RE`, rejects malformed thousand groups, filters "доставк", prices ≤10), then `find_best_match`; product URL recovered from page links. Used by OpenCart-ish sites where CSS selectors are brittle. |
+| `_cloudflare_blocked(page)` | Status 403/503/520–522 or title contains cloudflare markers. |
 
-**Fetch modes:**
-- `FAST` — Scrapling's HTTP-only `Fetcher` (no browser). Works on server-rendered pages. Very fast.
-- `STEALTHY` — Scrapling's `StealthyFetcher` (Chromium-based, stealth mode). For sites with bot detection.
-- `DYNAMIC` — Scrapling's `DynamicFetcher` (full Chromium). For JS-heavy SPAs.
+### Query pipeline (order matters)
 
-The URL-level cache prevents two threads from fetching the same URL concurrently (double-checked locking via per-URL `threading.Lock()`).
+For each supplier attempt: `item.search_label or item.label` → `normalize_search_query()` → `scrapers.query_variations.generate_variations(query, max_variations=6)`:
 
----
+1. Original
+2. UA→RU letter substitution (і→и, ї→и, є→е, ґ→г, apostrophes dropped) — for OLX/Prom listings typed in Russian
+3. Ceresit codes: `СТ-225`/`ct 225` → `"Ceresit CT 225"`, `"CT-225"`
+4. Hyphen split: `"Грунт-фарба"` → `"Грунт фарба"`
+5. Paint codes: `ГФ|ПФ|ХС|МА|МО|КО|ВД|АК|НЦ` + digits → `"ГФ-021"`, `"ГФ 021"`
+6. `query_simplifier.simplify_label()` shortenings (spec-style noise stripping)
+7. Compound roots (`"фарба грунтувальна"` → `"грунт-фарба"`), word reorder, synonym substitution, longest word alone
 
-## 7. Matching System (`matching/`)
-
-### `matcher.py`
-
-Core fuzzy matching used by scrapers to decide if a search result matches the queried material.
-
-**Key functions:**
-
-```python
-normalize_text(text: str) -> str
-# Lowercases, strips punctuation, applies Cyrillic→Latin transliteration,
-# normalizes Ru↔Ua variants (і↔и, є↔е, ї→и, ё→е, ы→и, э→е)
-
-calculate_match_score(query: str, candidate: str) -> float
-# Returns 0-100 score using rapidfuzz combination:
-# max(partial_ratio, token_sort_ratio, token_set_ratio)
-# with key-token verification (critical tokens from query must appear in candidate)
-
-find_best_match(query, candidates, threshold=DEFAULT_THRESHOLD) -> MatchResult | None
-find_top_matches(query, candidates, n=5, threshold=...) -> list[MatchResult]
-```
-
-`DEFAULT_THRESHOLD = 65` — below this score a match is rejected.
-
-### `monitorable.py`
-
-```python
-is_monitorable(label: str) -> bool
-```
-
-Returns `False` if `label` contains any keyword from `SKIP_KW` list (Ukrainian energy carriers, industrial chemicals, sensors, alarm electronics, cranes, etc.). Returns `True` for everything else — permissive by design. Called during кошторис import and DB migration.
-
-**Rule:** keep `SKIP_KW` short. Only add items that genuinely don't exist on Ukrainian retail construction sites.
-
-### `category_routing.py`
-
-```python
-get_suppliers_for_item(item: dict, active_supplier_ids: list) -> list[str]
-```
-
-Maps `item["category"]` to a supplier subset. Returns the intersection of the routed list and `active_supplier_ids`. Falls back to all active suppliers if category is unknown.
-
-**Category groups defined:**
-- `GENERAL_SUPPLIERS` — all retail suppliers (9)
-- `MARKETPLACE_SUPPLIERS` — prom, olx
-- `HVAC_SUPPLIERS` — teplodim
-- `ELECTRICAL_SUPPLIERS` — epicentr, kub, m2
-- `PLUMBING_SUPPLIERS` — epicentr, kub, venbud, m2, vista, buddvir
-- `INSULATION_SUPPLIERS` — epicentr, ars, buddvir, kub, venbud, m2, vista, budia
-- `HARDWARE_SUPPLIERS` — epicentr, kub, buddvir, budpostach, m2, vista
-
-To add routing for a new category: add a key to `CATEGORY_ROUTING` dict.
-
-### `search_label_converter.py`
-
-Converts display labels to cleaner search queries. Used when `item["search_label"]` is not set.
+Scrapers iterate the variation list and stop at the first hit.
 
 ---
 
-## 8. АВК-5 Parser (`parsers/kostoris_parser.py`)
-
-Reads `.xls` (via `xlrd`) or `.xlsx` (via `openpyxl`) using `pandas`.
-
-**Expected column layout (0-indexed):**
-- Col 1: resource code (e.g. `С111-2`, `К1-3`)
-- Col 2: material name
-- Col 3: unit
-- Col 4: quantity
-- Col 6: unit price
-
-**`CODE_RE`** filters rows: `r'^[&+]?[СCКк\d][\dА-Яа-яA-Za-z]'` — must look like a resource code.
-
-Categories are derived from numeric prefixes of resource codes (С111→Підлоги, С113→Трубопроводи, С114→Теплоізоляція, С151-152→Електрика, etc.).
-
-`is_monitorable(name)` is called per row — non-monitorable items get `monitorable=0` and are filtered out of the import preview by default. **Pass only `name` — the function takes 1 argument.**
-
-**Critical:** the parser is called via `/api/kostoris/parse` which receives a multipart file upload. The file bytes are read as-is. For `.xls` files with null bytes, strip them before parsing:
+## 8. Matching System (`matching/matcher.py`)
 
 ```python
-raw = file.read().replace(b'\x00', b'')
+normalize_text(text) -> str
+# lowercase; ё→е, ґ→г, ї/і→и, є→е, ы→и, э→е; drop ъ/ь/apostrophes;
+# strip punctuation; collapse spaces
+
+calculate_match_score(query, candidate) -> float   # 0..120
+# base = max(direct, transliterated) weighted rapidfuzz combo:
+#   0.35*partial_ratio + 0.30*token_sort_ratio + 0.35*token_set_ratio
+# tried in both alphabets (Cyr↔Lat transliteration tables)
+# + 15 bonus if normalized query is a substring of candidate (also transliterated)
+# + up to 10 bonus for per-token containment (exact / 4-char prefix / synonym)
+
+find_top_matches(query, candidates, threshold=DEFAULT_THRESHOLD, top_n=5, log_fn=None)
+find_best_match(query, candidates, ...)  # first of find_top_matches or None
 ```
+
+**`DEFAULT_THRESHOLD = 50`** ⚠ (not 65). Matches must ALSO pass `_verify_key_tokens()`:
+
+- ≥40 % of significant query tokens (4+ chars) must appear in the candidate (substring, 4-char prefix, transliterated, or synonym).
+- Numeric guard: if the query contains 2+ digit numbers (`CT-17`, `М100`), at least one must appear in the candidate — prevents CT-85 matching a CT-17 query.
+
+`_SYNONYM_GROUPS` maps retail-construction synonyms across UA/RU (утеплювач↔утеплитель↔минвата, фарба↔краска, шпаклівка variants, etc.) — stored in normalized form (и/е). Extend the groups there when a legitimate match is being rejected.
+
+### `matching/monitorable.py`
+
+`is_monitorable(label: str) -> bool` — **takes exactly 1 argument.** Permissive: True unless the label matches a `SKIP_KW` keyword (energy carriers, industrial chemicals, sensors/alarm electronics, rags, hoisting, misc non-retail). Keywords starting with `^` are prefix-anchored (e.g. `"^вода"`). Keep `SKIP_KW` short.
+
+⚠ **TEMPORARY override active:** `MONITOR_ALL_ITEMS=1` in .env makes `is_monitorable()` return True unconditionally, and `_migrate()` syncs all DB rows to `monitorable=1` when the mode changes (see §13). The blocklist is bypassed until that .env line is removed. Note: category routing still applies — items in explicit-skip categories (Автоматизація, Енергоносії, …) are only tried on marketplaces (prom/olx) when those are enabled.
+
+### `matching/category_routing.py`
+
+`get_suppliers_for_item(item, all_supplier_ids) -> list[str]` — routing order:
+
+1. **Label override:** if the item label contains any `RETAIL_OVERRIDE_KW` keyword (шпаклівка, штукатурка, ceresit, knauf, …) → route to `GENERAL_SUPPLIERS` regardless of category.
+2. Otherwise `CATEGORY_ROUTING.get(category, DEFAULT_SUPPLIERS)` (DEFAULT = GENERAL_SUPPLIERS).
+3. Explicitly **empty** categories (Автоматизація (КВП), Енергоносії, Спеціальні роботи, Вантажопідйомне устаткування, Інше устаткування) → specialists skipped entirely.
+4. Marketplace tail: `prom`/`olx` (if enabled) are **always appended after** the specialist list — including for empty categories, where they are the only suppliers tried.
+5. Everything is intersected with the enabled supplier set, preserving order.
+
+Groups: `GENERAL_SUPPLIERS` (9 retail), `MARKETPLACE_SUPPLIERS` (prom, olx), `HVAC_SUPPLIERS` (teplodim), `ELECTRICAL_SUPPLIERS` (epicentr, kub, m2), `PLUMBING_SUPPLIERS` (6), `INSULATION_SUPPLIERS` (8). ⚠ `HARDWARE_SUPPLIERS` is defined but not referenced by `CATEGORY_ROUTING` — currently dead config.
 
 ---
 
-## 9. Suppliers Registry (`core/suppliers.py`)
+## 9. АВК-5 Parser (`parsers/kostoris_parser.py`)
 
-```python
-SUPPLIER_REGISTRY: list[tuple[str, str, str, str, bool]] = [
-    ("epicentr", "Епіцентр К", "https://epicentrk.ua", "scrapers.epicentr", True),
-    ...
-]
-```
+Reads `.xls` via `xlrd` (manual cell copy → DataFrame) or `.xlsx` via `pandas.read_excel(sheet_name=0, header=None)`. The upload route hands it a **temp file path** (no in-memory byte munging).
 
-**To add a new supplier:**
-1. Create `scrapers/<id>.py` with `def scrape(supplier, label, log, saved_url=None)`.
-2. Add one tuple to `SUPPLIER_REGISTRY`.
-3. Optionally add routing rules in `category_routing.py`.
+**Column layout (0-indexed):** col 1 = resource code, col 2 = name, col 3 = unit, col 4 = qty, col 6 = unit price.
 
-`build_suppliers()` dynamically imports each scraper module at startup. Failed imports print a warning and skip the supplier rather than crashing.
+- `CODE_RE = re.compile(r'^[&+]?[СCКк\d][\dА-Яа-яA-Za-z]')` — row must look like a resource code; `варіант N` suffixes stripped.
+- Rows deduped by lowercased name (duplicates only logged to console).
+- Categories derived from the numeric code prefix: К→Конструкції збірні; С111→Підлоги/покрівлі; С112→Пиломатеріали; С113→Трубопроводи; С114→Теплоізоляція; С121/С124→метал; С123→Вікна та двері; С130 (sub-code 62 → Вентиляція, else Теплопостачання); С151–152→Кабельні системи; equipment ranges 1100–1999 (опалення, вентиляція, сантехніка, електрика, КВП, крани…); С100-XXXX by sub-code; fallback `Матеріали будівельні`.
+- Each row → `{code, name, unit, qty, unit_price, retail, category}` where `retail = is_monitorable(name)` ⚠ (field is named `retail` in parse output but becomes `monitorable` after import).
 
 ---
 
-## 10. Frontend (`static/js/app.js`)
+## 10. Suppliers Registry (`core/suppliers.py`)
 
-~3000 lines, vanilla JS, no build step. Served with cache-busting via `?v={mtime}` query string (computed in `app.py`).
+```python
+SUPPLIER_REGISTRY: list[tuple[id, name, url, module, enabled]]  # 13 entries
+SUPPLIERS = build_suppliers()   # module-level, built at import
+```
+
+`build_suppliers()` imports each scraper module; a failed import prints a warning and **skips that supplier** (no crash). `enabled=True` means "available to toggle in the UI", not "on by default". Marketplaces (prom, olx) were added 2026-05-18.
+
+**To add a supplier:** create `scrapers/<id>.py` with the `scrape()` contract (usually just a `SiteConfig` + `search_and_extract`/`text_based_extract` wrapper — see `vista.py` for the minimal pattern), add one registry tuple, optionally add routing in `category_routing.py`.
+
+---
+
+## 11. Frontend (`static/js/app.js`)
+
+~2000 lines, vanilla JS, plain top-level script (no IIFE, no modules, no build step). Cache-busted via `?v={mtime}` (newer of app.js/app.css mtimes, computed by `_asset_version()` in app.py).
 
 ### Key globals
 
 | Variable | Purpose |
 |---|---|
-| `monitorQueue` | Array of item objects selected for batch monitoring |
-| `batchRunning` | True while a batch poll loop is active |
-| `batchStopped` | True after user clicked stop (disables re-start until drain completes) |
-| `currentPanel` | ID of currently visible panel |
+| `allItems` / `allItemsData` | Item lists for dropdown / items panel |
+| `importItems` / `selectedNames` | Last кошторис parse rows + selected-for-import set |
+| `monitorQueue` / `monitorDone` / `monitorMode` | Batch queue, done counter, `'single'`\|`'batch'` |
+| `batchRunning` / `batchStopped` | Batch poll-loop state / stop-clicked latch |
+| `serverConfig` | `{max_parallel_items, default_parallel_items}` fetched from `/api/config` at boot |
+| `availabilityData` | Cached `/api/availability` response `{coverage, items}` |
+| `MAX_LOG_LINES = 800` | Batch log trim threshold |
 
-### Key functions
+⚠ There is **no `currentPanel` global** — active panel is tracked via DOM classes by `showPanel(name, btn)`.
+
+### Key functions (verified line refs as of 2026-07-04)
 
 | Function | Description |
 |---|---|
-| `showPanel(id, btn)` | Switch active panel, update nav button highlight |
-| `setMonitorMode(mode)` | `'single'` or `'batch'` — toggles sub-tabs in Monitoring panel, calls `renderMonitorTab()` |
-| `renderMonitorTab()` | Rebuilds the queue item list, computes estimated time/cost |
-| `runBatch()` | POSTs to `/api/scrape/batch`, then enters poll loop |
-| `appendBatchLog(lines)` | Appends lines to `#batch-log-body`, trims to MAX_LOG_LINES=800, auto-scrolls |
-| `batchLog(msg)` | Single-line wrapper around `appendBatchLog` |
-| `stopBatch()` | POSTs `/api/stop`, disables stop button, sets `batchStopped=true` |
-| `updateBatchProgress(done, total, startedAt)` | Updates progress bar and `X/N матеріалів` counter |
-| `poll()` | Single-item scrape poller (1.5s interval) |
-| `loadResults()` | Fetches `/api/results` and re-renders results table |
-| `_startElapsedTick(startedAt)` | Starts a 1s timer showing elapsed time in the progress bar |
-| `_stopElapsedTick()` | Clears the elapsed timer |
+| `showPanel(name, btn)` | Switch panel + nav highlight |
+| `setMonitorMode(mode)` | `'single'`/`'batch'` sub-tabs; calls `renderMonitorTab()` |
+| `renderMonitorTab()` | Rebuild queue list, estimated time |
+| `runBatch()` | POST `/api/scrape/batch` → poll loop (1500 ms, `?log_offset=`) |
+| `stopBatch()` | POST `/api/stop`, sets `batchStopped=true`, disables button |
+| `updateBatchProgress(done, total, startedAt)` | Progress bar + `X/N` counter |
+| `appendBatchLog(lines)` / `batchLog(msg)` | Incremental log append + trim |
+| `poll()` | Single-scrape poller, **1200 ms** interval |
+| `updateRunBadges(d)` | Mirrors `label`/`last_run` from an `/api/status` payload into the header badges + sidebar. Called every tick by BOTH batch poll loops (and inlined in `poll()`) — without it the Results-tab chips show the previous run until refresh. |
+| `loadResults()` | GET `/api/results` → render table |
+| `_startElapsedTick(startedAt)` / `_stopElapsedTick()` | 1 s elapsed timer |
 
-### Page-reload reconnect (startup block)
+### Page-reload reconnect (startup block, ~line 200)
 
-On every page load, the app fetches `/api/status`. If `d.running === true`:
-- `d.parallel_items && d.total_items > 1` → batch reconnect: calls `setMonitorMode('batch')`, restores queue from `/api/items` filtered by `d.item_ids`, starts `reconnectBatchPoll()` async loop.
-- Otherwise → single-item reconnect: calls `poll()`.
+On load, GET `/api/status`; if `running`:
+- `parallel_items && total_items > 1` → batch reconnect: `showPanel('monitor')` → `setMonitorMode('batch')` → **then** `updateBatchProgress(...)` (order matters: `setMonitorMode` → `renderMonitorTab()` would reset the progress display) → restore `monitorQueue` from `/api/items` filtered by `status.item_ids` → async `reconnectBatchPoll()` loop (1500 ms).
+- Otherwise → single-item reconnect via `poll()`.
 
-**Order matters:** `updateBatchProgress()` must be called **after** `setMonitorMode('batch')` because `setMonitorMode` calls `renderMonitorTab()` which would reset the progress display.
+Startup also restores last results (`/api/results`) and last import preview (`/api/kostoris/last`).
 
-### Batch poll loop exit condition
+### Batch poll exit condition
 
-Both `runBatch()` and `reconnectBatchPoll()` break only on `s.running === false` from the server. They do **not** break on `batchStopped`. This ensures the UI waits for the server to fully drain before showing results and re-enabling the Run button.
+Both `runBatch()` and `reconnectBatchPoll()` break **only** on `s.running === false` — never on `batchStopped`. The UI waits for the server to fully drain before re-enabling Run and switching to Results.
 
-### Stop button wrapper
+### Stop button
 
-The stop button lives inside `#btn-stop-batch-wrap` (a `<div>` with `display:none` by default). Show/hide the wrapper, not the button itself. The tooltip (`.stop-tip-box`) is a CSS-only hover tooltip anchored to `.stop-tip-wrap`.
-
----
-
-## 11. Styling (`static/css/app.css`)
-
-Theming via `[data-theme="dark"]` attribute on `<html>`. CSS custom properties (`--paper`, `--ink`, `--accent`, etc.) define the palette.
-
-**Dark mode filter buttons fix:**
-```css
-[data-theme="dark"] .btn-sel-all {
-  background: var(--paper2);
-  color: var(--ink);
-}
-```
-
-**Tooltip (above stop button):**
-```css
-.stop-tip-box {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  width: 220px;
-  pointer-events: none;
-  z-index: 200;
-}
-.stop-tip-wrap:hover .stop-tip-box { display: block; }
-```
-Arrow points **down** toward the button (uses `border-top-color` on `::before`/`::after`).
+Lives in `#btn-stop-batch-wrap` (hidden by default) — show/hide the **wrapper**. Tooltip `.stop-tip-box` is CSS-only, anchored to `.stop-tip-wrap:hover`, arrow points down via `::before`/`::after` border tricks.
 
 ---
 
-## 12. Environment Variables
+## 12. Styling (`static/css/app.css`)
 
-All read at startup via `python-dotenv` from `.env` in the project root.
+Theming via `[data-theme="dark"]` on `<html>`; palette in CSS custom properties (`--paper`, `--ink`, `--accent`, …).
+
+Dark-mode filter-button fix (keep):
+```css
+[data-theme="dark"] .btn-sel-all { background: var(--paper2); color: var(--ink); border-color: var(--border2); }
+```
+
+---
+
+## 13. Environment Variables (`.env`, read via python-dotenv)
 
 | Variable | Default | Where used |
 |---|---|---|
-| `PORT` | `5000` | `app.py` — Flask listen port |
-| `MAX_PARALLEL_ITEMS` | `10` | `runner.py` — outer ThreadPool cap |
-| `MAX_INNER_WORKERS` | `8` | `runner.py` — suppliers per item in parallel |
-| `MAX_INNER_WORKERS_DISCOVERY` | `10` | `runner.py` — inner workers in discovery mode |
-| `SKIP_STALE_DAYS` | `30` | `runner.py` — days before "not found" cache expires |
+| `PORT` | `5000` | `app.py` |
+| `MAX_PARALLEL_ITEMS` | `10` | `runner.py` outer pool cap. `DEFAULT_PARALLEL_ITEMS = min(cap, 5)`. ⚠ `app.py`'s startup banner re-reads it with default `"5"` — display only. |
+| `MAX_INNER_WORKERS` | `8` | Suppliers per item in parallel |
+| `MAX_INNER_WORKERS_DISCOVERY` | `10` | Inner workers in discovery mode (items run sequentially) |
+| `SKIP_STALE_DAYS` | `30` | Days before a "not found" entry is re-checked |
+| `MONITOR_ALL_ITEMS` | `0` (currently `1` in .env) | ⚠ TEMPORARY customer request 2026-07: `1` bypasses the SKIP_KW blocklist — `is_monitorable()` always True + one-time startup sync sets every existing item `monitorable=1` (settings key `monitor_all_mode` in `_migrate()`). Remove from .env + restart to revert (flags recomputed from labels). |
 
 ---
 
-## 13. Excel Export (`routes/exports.py`)
+## 14. Excel Exports (`routes/exports.py`)
 
-`_build_excel(results, label)` builds an `.xlsx` in memory using `openpyxl`.
+`_build_excel(results, label)` (pandas + openpyxl, in-memory):
 
-- Results are grouped by `item_label` with blank separator rows between materials.
-- Top-3 cheapest prices per material get 🥇🥈🥉 in the leftmost cell.
-- Columns: #, Material, Supplier, Price (UAH), Unit, Qty, Total, Estimate price, Diff%, URL, Comment.
-- All files are saved to `exports/` with a timestamp filename and also returned directly to the browser.
-- `_safe_export_path(filename)` prevents path traversal attacks (rejects `..` and absolute paths).
+- One flat sheet "Ціни"; ⚠ **no blank separator rows and no 🥇🥈🥉 emoji** — top-3 cheapest per `item_label` group get **whole-row fills** (gold `FFF4C7` / silver `E5E5E5` / bronze `F4DBC1`) + bold colored price cell. Ranks computed on *distinct* prices; ties share a rank.
+- Column order = `COLUMN_ORDER`: Матеріал кошторису, Назва товару, Ціна за од., Валюта, Од., К-сть (кошторис), Од. (кошторис), Загальна ціна, Бренд, Артикул, Характеристики, Постачальник, Коментар, Посилання, Дата. ⚠ There is no `#`, no estimate-price and no Diff% column in this export.
+- Dark header row, auto column widths, saved to `exports/<label>_<timestamp>.xlsx` and streamed.
+
+`/api/export/price-matrix` builds item × supplier `last_price` matrix with Мін/Макс/Знайдено/Розкид % columns; min-price cells highlighted green. `/api/projects/<id>/export` adds estimate-vs-best comparison per project.
 
 ---
 
-## 14. Critical Conventions & Gotchas
+## 15. Critical Conventions & Gotchas
 
-### NEVER use Edit tool or `replace_all` on large Cyrillic files
+### NEVER use the Edit tool or `replace_all` on large Cyrillic files
 
-Files like `app.js`, `app.css`, `index.html` contain Cyrillic characters. The Edit tool's string matching can introduce **null bytes (`\x00`)** that silently corrupt the file on Windows when content is large. Always use Python bash string manipulation for edits on these files:
+`app.js`, `app.css`, `index.html` contain Cyrillic + CRLF. String-match edits have corrupted them with null bytes (`\x00`) on Windows before. Edit these files via Python instead:
 
 ```bash
 python3 - <<'EOF'
@@ -604,77 +587,64 @@ text = text.replace('old string', 'new string')
 p.write_bytes(text.encode('utf-8'))
 EOF
 ```
+For CRLF files: normalize `\r\n`→`\n` before replacing, restore after.
 
-For files with CRLF line endings (Windows), normalize before replace and restore after:
-```python
-text = text.replace('\r\n', '\n')
-# ... make replacements ...
-text = text.replace('\n', '\r\n')
-```
+### Other rules
 
-### `state` and `item_states` reset on server restart
+- **`is_monitorable(label)` takes exactly 1 argument.** `is_monitorable(name, category)` → TypeError.
+- **`state` / `item_states` reset on server restart**; `data/last_run.json` repopulates the Results tab. Mutate the dicts in place, never rebind.
+- **WAL flag:** `_wal_enabled` global in `item_db.py` avoids re-running `PRAGMA journal_mode=WAL` per connection. Don't reset it.
+- **`done_items` vs `found_items`:** use `done_items` for progress (all supplier futures finished). `found_items` counts items with ≥1 result.
+- **Saved-URL fast path:** scrapers must try the stored `supplier_entries.url` first and validate the title against the label before trusting it; fall back to search on 4xx/no-price/low score.
+- **Discovery mode:** ignores SKIP_STALE_DAYS + session cache, runs items sequentially (`parallel_items=1`) with `MAX_INNER_WORKERS_DISCOVERY` inner workers, does NOT populate the session cache.
+- **Overrides survive re-scrapes:** `update_supplier_entry()` is a single UPSERT (`ON CONFLICT DO UPDATE`) that never touches `manual_price`/`comment` — keep it that way; a SELECT-then-REPLACE here reintroduces a lost-update window vs. concurrent PATCH overrides.
+- **No per-domain politeness:** the fetch layer dedupes identical URLs only. Don't raise `MAX_PARALLEL_ITEMS` casually — 10 items × same routed site = 10 concurrent hits on that site.
+- **`score_title(title, label)`** — candidate first, query second. Easy to swap accidentally.
+- **`update_item()` whitelist** silently drops unknown fields — adding a new editable item field requires extending `_FLOAT_FIELDS`/`_INT_FIELDS`/`_TEXT_FIELDS` in `item_db.py`.
 
-These are in-memory Python dicts. Any page reload while the server is running preserves them. A server restart (closing START.bat, app crash) clears them. `last_run.json` on disk persists results across restarts for the Results tab.
+### Known issues & dead code (as of 2026-07-04)
 
-### `is_monitorable()` takes exactly 1 argument
+**Correctness / concurrency:**
 
-```python
-# CORRECT:
-is_monitorable(name)
+1. ⚠ Check-then-act race on `state["running"]` in scrape routes (see §4).
+2. ⚠ `/api/status` may hit "dict changed size" while a batch is (re)initializing `item_states` (see §4).
+3. ⚠ `m2.py` single-word search fallback passes the word as the *matching label* (`search_and_extract(CONFIG, word, log)`) — candidates are scored against one generic word, so a wrong product can be saved as `found=1`, and its URL then becomes the trusted `saved_url` on later runs (self-perpetuating). Fix: keep the word as the search query but score candidates against the full original label (venbud.py's fallback already does this correctly — copy that pattern).
+4. Runner ignores the second element of a scraper's `(None, url)` return — on not-found it re-writes the previously saved DB URL; returning a fresh URL without a result has no effect.
+5. `kostoris_parser` assumes ≥7 columns (`row[6]`); narrower sheets raise and surface as HTTP 500 from `/api/kostoris/parse`.
 
-# WRONG (will raise TypeError):
-is_monitorable(name, category)
-```
+**Performance (worth doing, none urgent):**
 
-### WAL mode is set once per process
+6. No per-domain rate limiting in `fetch_html` — up to `parallel_items` threads can hit one site's search simultaneously (ban risk). A per-domain semaphore (2–3) would be the highest-value change.
+7. `/api/scrape` finds an item by label via `load_items()` (full items + supplier_entries dump per request) — add a `get_item_by_label()` query.
+8. `price_history` inserts a row on every run even when the price is unchanged — no dedup or pruning.
+9. No `busy_timeout` PRAGMA; heavy batches (up to `parallel_items × MAX_INNER_WORKERS` writer threads) rely on WAL + sqlite3's default 5 s connect timeout.
+10. KUB: DYNAMIC fetch (timeout 90 s, wait 10 s) × up to 6 query variations — one not-found item can hold an inner worker for minutes. Consider capping variations for browser-mode sites.
+11. `venbud.py` AJAX search POSTs via `requests` directly, bypassing the fetch cache/lock layer — repeated variations re-POST every time.
+12. `fetch_html` cache holds up to 500 parsed page objects in memory (TTL 300 s) — can be heavy on long discovery runs.
 
-`_wal_enabled` global in `item_db.py` prevents redundant `PRAGMA journal_mode=WAL` on every connection. Do not reset it.
+**Dead / legacy:**
 
-### `found_items` vs `done_items`
-
-- `found_items`: items with at least one result (can jump to 100% at batch start if session cache has data from a previous run).
-- `done_items`: items where all supplier futures have completed. Use `done_items` for progress display.
-
-### Scraper `saved_url` fast path
-
-If a supplier entry already has a `url` (from a previous successful scrape), the scraper should try that URL first. Only fall back to a search query if the saved URL returns 4xx or an empty page. This dramatically reduces scrape time on repeat runs.
-
-### Discovery mode
-
-`start_batch(..., discovery_mode=True)` ignores `SKIP_STALE_DAYS` and runs all suppliers for all items regardless of cache. Sets `parallel_items=1` (sequential) and uses `MAX_INNER_WORKERS_DISCOVERY` (higher) for the inner supplier pool.
-
----
-
-## 15. Adding a New Scraper
-
-1. Create `scrapers/<supplier_id>.py`.
-2. Implement `scrape(supplier, label, log, saved_url=None) -> tuple[dict|None, str|None]`.
-3. Import helpers from `scrapers/_scrapling_base.py` — use `fetch_html()`, `parse_price()`, `pick_best_card()`.
-4. Choose fetch mode: prefer `FETCH_MODE_FAST` unless the site needs JS rendering.
-5. Add entry to `SUPPLIER_REGISTRY` in `core/suppliers.py`.
-6. Add routing rules to `category_routing.py` if the supplier only covers certain categories.
-7. Test manually with `python -c "from scrapers.mysup import scrape; print(scrape({'id':'x','name':'X','url':'...'}, 'Цегла М100', print, None))"`.
+13. `HARDWARE_SUPPLIERS` in category_routing.py is unused.
+14. `items.project_id` column is legacy; junction table `project_items` is authoritative.
 
 ---
 
 ## 16. Tests
 
-Run with: `python -m pytest tests/ -v`
+Run: `python -m pytest tests/ -v` — no network, pure logic.
 
 | Test file | Covers |
 |---|---|
 | `test_matcher.py` | normalize_text, calculate_match_score, find_best_match |
 | `test_price_parsing.py` | parse_price edge cases |
-| `test_query_simplifier.py` | normalize_search_query variations |
-| `test_query_variations.py` | search query expansion |
-| `test_result_overrides.py` | apply_overrides() price replacement logic |
-| `test_result_sort.py` | sort_results() grouping |
-| `test_batch_controls.py` | clamp_parallel(), apply_limit() — 17 cases |
-| `test_safe_export_path.py` | path traversal prevention |
-| `test_session_cache.py` | fetch cache TTL and eviction |
-| `test_excel_medals.py` | 🥇🥈🥉 medal assignment logic |
-
-No external services are called in tests — all mocked.
+| `test_query_simplifier.py` | simplify_label variants |
+| `test_query_variations.py` | generate_variations expansion |
+| `test_result_overrides.py` | apply_overrides() splice logic |
+| `test_result_sort.py` | sort_results() UA-folded grouping |
+| `test_batch_controls.py` | clamp_parallel(), apply_limit() |
+| `test_safe_export_path.py` | export path traversal prevention |
+| `test_session_cache.py` | fetch cache TTL + eviction |
+| `test_excel_medals.py` | top-3 medal rank assignment |
 
 ---
 
@@ -682,16 +652,16 @@ No external services are called in tests — all mocked.
 
 ```
 START.bat
-  → activate .venv
-  → pip install -r requirements.txt (first run only)
-  → scrapling install (first run only)
+  → checks Python ≥3.10 on PATH
+  → creates .venv (first run)
+  → pip install -r requirements.txt + `scrapling install`
+    (fallback: python -m playwright install chromium) — once, marked by .venv\.setup_done
+  → opens http://localhost:5000 via PowerShell after 5 s
   → python app.py
       → load_dotenv()
-      → Flask(__name__)
-      → register 5 blueprints
-      → init_db() → creates tables, runs _migrate()
-      → ensure_exports_dir(), ensure_debug_dir()
-      → app.run(threaded=True, port=5000)
+      → Flask(__name__) + register 5 blueprints
+      → AT IMPORT TIME: init_db() (tables + _migrate()), ensure_exports_dir(), ensure_debug_dir()
+      → app.run(debug=False, host="0.0.0.0", port=PORT, threaded=True)
 ```
 
-Browser opens via PowerShell `Start-Process` after 5-second delay (from START.bat).
+⚠ `init_db()` runs at module import (so WSGI servers get it too). ⚠ Binds `0.0.0.0` — LAN-exposed, no auth.
