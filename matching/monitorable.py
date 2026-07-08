@@ -21,6 +21,24 @@ suppliers. Worst case: the scraper returns "not found", which is fine.
 
 from __future__ import annotations
 
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ── TEMPORARY override (customer request, 2026-07): monitor EVERYTHING ──
+# When MONITOR_ALL_ITEMS=1, is_monitorable() always returns True, so imports
+# mark every item monitorable and the runner skips nothing. Existing DB rows
+# are synced once at startup — see the 'monitor_all_mode' block in
+# core/item_db._migrate().
+# DEFAULT IS ON ("1") so fresh installs from git behave the same without
+# needing a .env file (.env is not committed).
+# To restore the SKIP_KW blocklist: set MONITOR_ALL_ITEMS=0 in .env (or flip
+# this default back to "0") and restart — the next startup recomputes
+# monitorable from labels.
+MONITOR_ALL: bool = os.getenv("MONITOR_ALL_ITEMS", "1") == "1"
+
 # Items that are NOT findable on retail building suppliers.
 # Keep this list SHORT — only things no retail construction site stocks.
 SKIP_KW: list[str] = [
@@ -114,7 +132,12 @@ SKIP_KW: list[str] = [
 def is_monitorable(label: str) -> bool:
     """Return True if *label* is likely findable on Ukrainian retail
     building-material sites.  Returns True by default (permissive);
-    returns False only when the label clearly matches a SKIP keyword."""
+    returns False only when the label clearly matches a SKIP keyword.
+
+    TEMPORARY: when MONITOR_ALL_ITEMS=1 the blocklist is bypassed entirely
+    and everything is monitorable (see module header)."""
+    if MONITOR_ALL:
+        return True
     if not label:
         return True
     lower = label.lower().strip()

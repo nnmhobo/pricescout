@@ -44,7 +44,7 @@ def _migrate(conn):
     against an existing DB would pointlessly rewrite every row on every
     startup.
     """
-    from matching.monitorable import is_monitorable
+    from matching.monitorable import is_monitorable, MONITOR_ALL
     cols = {r[1] for r in conn.execute("PRAGMA table_info(items)").fetchall()}
     monitorable_freshly_added = "monitorable" not in cols
     if monitorable_freshly_added:
@@ -88,6 +88,18 @@ def _migrate(conn):
             PRIMARY KEY (project_id, item_id)
         );
     """)
+    # Per-project ordering + per-project estimate values (feature 2026-07):
+    # a project mirrors ONE imported кошторис file — items keep the file's
+    # row order (position), and qty / estimate_unit_price live on the link
+    # so two projects can share a material with different quantities.
+    pi_cols = {r[1] for r in conn.execute("PRAGMA table_info(project_items)").fetchall()}
+    if "position" not in pi_cols:
+        conn.execute("ALTER TABLE project_items ADD COLUMN position INTEGER")
+    if "qty" not in pi_cols:
+        conn.execute("ALTER TABLE project_items ADD COLUMN qty REAL")
+    if "estimate_unit_price" not in pi_cols:
+        conn.execute("ALTER TABLE project_items ADD COLUMN estimate_unit_price REAL")
+
     # One-time migration: move legacy project_id column values into junction table
     pi_rows = conn.execute("SELECT COUNT(*) FROM project_items").fetchone()[0]
     if pi_rows == 0:
@@ -224,6 +236,32 @@ def _migrate(conn):
 
         conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '3')"
+        )
+
+    # ── MONITOR_ALL_ITEMS mode sync (TEMPORARY, customer request 2026-07) ──
+    # Keeps existing rows consistent with the flag in matching/monitorable.py.
+    # Runs only when the mode CHANGES (tracked in settings), not on every
+    # startup:
+    #   'all'      → force monitorable=1 on every item
+    #   'filtered' → recompute from labels via the SKIP_KW blocklist
+    mode = "all" if MONITOR_ALL else "filtered"
+    cur = conn.execute(
+        "SELECT value FROM settings WHERE key='monitor_all_mode'"
+    ).fetchone()
+    if cur is None or cur[0] != mode:
+        if MONITOR_ALL:
+            conn.execute("UPDATE items SET monitorable=1")
+        else:
+            rows = conn.execute("SELECT id, label FROM items").fetchall()
+            updates = [
+                (1 if is_monitorable(label or "") else 0, item_id)
+                for item_id, label in rows
+            ]
+            if updates:
+                conn.executemany("UPDATE items SET monitorable=? WHERE id=?", updates)
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('monitor_all_mode', ?)",
+            (mode,),
         )
 
 
@@ -428,21 +466,37 @@ def add_item(label: str, source: str = "manual",
     }
 
 
-def batch_add_items(entries: list, project_id: str | None = None) -> tuple[int, int]:
+def batch_add_items(entries: list, project_id: str | None = None) -> tuple[int, int, int]:
     """
-    Bulk insert items from кошторис. Much faster than calling add_item() in a loop.
-    entries: list of dicts with optional fields:
+    Bulk insert items from кошторис, preserving the file's row order.
+
+    entries: ORDERED list of dicts with optional fields:
       {label, source, avk_code, category, qty, unit, estimate_unit_price}
-    Returns (added, skipped) counts.
+
+    Items already in the DB (matched by label) are NOT re-inserted, but when
+    ``project_id`` is given they ARE linked to the project. The project's
+    link set is REPLACED ("sync to file"): position = row index in the
+    imported selection, and per-project qty / estimate_unit_price are stored
+    on the link so other projects sharing the material keep their own values.
+
+    Returns (added, linked, skipped):
+      added   — new items inserted into the shared items table
+      linked  — project links written (0 when project_id is None)
+      skipped — entries with an empty or in-file-duplicated label
     """
     from matching.monitorable import is_monitorable
-    added = skipped = 0
+    added = linked = skipped = 0
     now = datetime.now().strftime("%Y-%m-%d")
 
     with get_conn() as conn:
-        existing_labels = {r[0] for r in conn.execute("SELECT label FROM items").fetchall()}
+        label_to_id = {
+            r["label"]: r["id"]
+            for r in conn.execute("SELECT id, label FROM items").fetchall()
+        }
 
         rows = []
+        links = []  # (item_id, position, qty, estimate_unit_price)
+        seen_in_file: set = set()
         base_id = datetime.now().strftime("%Y%m%d%H%M%S")
         for idx, e in enumerate(entries):
             label    = (e.get("label") or "").strip()
@@ -453,19 +507,21 @@ def batch_add_items(entries: list, project_id: str | None = None) -> tuple[int, 
             unit     = _coerce("unit", e.get("unit"))
             est_up   = _coerce("estimate_unit_price", e.get("estimate_unit_price"))
 
-            if not label:
+            if not label or label in seen_in_file:
                 skipped += 1
                 continue
-            if label in existing_labels:
-                skipped += 1
-                continue
+            seen_in_file.add(label)
 
-            item_id = f"{base_id}{idx:06d}"
-            mon = 1 if is_monitorable(label) else 0
-            rows.append((item_id, label, now, source, avk_code, category,
-                         qty, unit, est_up, mon, project_id or None))
-            existing_labels.add(label)
-            added += 1
+            item_id = label_to_id.get(label)
+            if item_id is None:
+                item_id = f"{base_id}{idx:06d}"
+                mon = 1 if is_monitorable(label) else 0
+                rows.append((item_id, label, now, source, avk_code, category,
+                             qty, unit, est_up, mon, None))
+                label_to_id[label] = item_id
+                added += 1
+
+            links.append((item_id, len(links), qty, est_up))
 
         if rows:
             conn.executemany(
@@ -475,14 +531,19 @@ def batch_add_items(entries: list, project_id: str | None = None) -> tuple[int, 
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 rows,
             )
-            if project_id:
-                now_iso = datetime.now().isoformat()
-                conn.executemany(
-                    "INSERT OR IGNORE INTO project_items (project_id, item_id, added) VALUES (?, ?, ?)",
-                    [(project_id, r[0], now_iso) for r in rows],
-                )
+        if project_id and links:
+            # Sync-to-file: the project mirrors the imported selection.
+            now_iso = datetime.now().isoformat()
+            conn.execute("DELETE FROM project_items WHERE project_id=?", (project_id,))
+            conn.executemany(
+                """INSERT OR IGNORE INTO project_items
+                       (project_id, item_id, added, position, qty, estimate_unit_price)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                [(project_id, iid, now_iso, pos, q, ep) for iid, pos, q, ep in links],
+            )
+            linked = len(links)
 
-    return added, skipped
+    return added, linked, skipped
 
 
 def delete_item(item_id: str):
@@ -492,22 +553,24 @@ def delete_item(item_id: str):
 
 def update_supplier_entry(item_id: str, supplier_id: str,
                           url: str | None, found: bool, price: float | None):
-    """Persist a fresh scrape result. Preserves any existing manual_price
-    / comment override so the user's hand edits aren't wiped on the next run.
+    """Persist a fresh scrape result. Single UPSERT that never touches
+    manual_price / comment, so the user's hand edits survive re-scrapes AND
+    can't be clobbered by an in-flight scrape write (the old
+    SELECT-then-REPLACE had a lost-update window when the user edited an
+    override while a batch was running).
     """
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     with get_conn() as conn:
-        existing = conn.execute(
-            "SELECT manual_price, comment FROM supplier_entries WHERE item_id=? AND supplier_id=?",
-            (item_id, supplier_id),
-        ).fetchone()
-        manual_price = existing["manual_price"] if existing else None
-        comment = existing["comment"] if existing else None
         conn.execute("""
-            INSERT OR REPLACE INTO supplier_entries
-                (item_id, supplier_id, url, found, last_checked, last_price, manual_price, comment)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (item_id, supplier_id, url, int(found), now, price, manual_price, comment))
+            INSERT INTO supplier_entries
+                (item_id, supplier_id, url, found, last_checked, last_price)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(item_id, supplier_id) DO UPDATE SET
+                url          = excluded.url,
+                found        = excluded.found,
+                last_checked = excluded.last_checked,
+                last_price   = excluded.last_price
+        """, (item_id, supplier_id, url, int(found), now, price))
         if found and price:
             conn.execute(
                 "INSERT INTO price_history (item_id, supplier_id, price, checked_at) VALUES (?, ?, ?, ?)",
@@ -732,12 +795,20 @@ def delete_project(project_id: str):
 
 
 def get_project_items(project_id: str) -> list[dict]:
+    """Items of a project in the imported file's row order (position).
+
+    Per-project qty / estimate_unit_price stored on the link override the
+    shared item values when present, so each project shows the numbers from
+    ITS кошторис. Adds a ``position`` key to each dict."""
     with get_conn() as conn:
         rows = conn.execute(
-            """SELECT i.* FROM items i
+            """SELECT i.*, pi.position AS link_position,
+                      pi.qty AS link_qty,
+                      pi.estimate_unit_price AS link_est_price
+               FROM items i
                JOIN project_items pi ON pi.item_id = i.id
                WHERE pi.project_id = ?
-               ORDER BY i.label""",
+               ORDER BY (pi.position IS NULL), pi.position, i.label""",
             (project_id,)
         ).fetchall()
         if not rows:
@@ -748,14 +819,27 @@ def get_project_items(project_id: str) -> list[dict]:
             f"SELECT * FROM supplier_entries WHERE item_id IN ({ph})", item_ids
         ).fetchall()
         sup_map = _build_sup_map(sup_rows)
-        return [_row_to_dict(r, sup_map.get(r["id"], {})) for r in rows]
+        result = []
+        for r in rows:
+            d = _row_to_dict(r, sup_map.get(r["id"], {}))
+            d["position"] = r["link_position"]
+            if r["link_qty"] is not None:
+                d["qty"] = r["link_qty"]
+            if r["link_est_price"] is not None:
+                d["estimate_unit_price"] = r["link_est_price"]
+            result.append(d)
+        return result
 
 
 def add_item_to_project(project_id: str, item_id: str):
+    """Manual add from the Projects tab — appended at the END of the order."""
     with get_conn() as conn:
         conn.execute(
-                "INSERT OR IGNORE INTO project_items (project_id, item_id, added) VALUES (?, ?, ?)",
-            (project_id, item_id, datetime.now().isoformat())
+            """INSERT OR IGNORE INTO project_items (project_id, item_id, added, position)
+               VALUES (?, ?, ?,
+                       COALESCE((SELECT MAX(position) + 1 FROM project_items
+                                 WHERE project_id = ?), 0))""",
+            (project_id, item_id, datetime.now().isoformat(), project_id)
         )
 
 

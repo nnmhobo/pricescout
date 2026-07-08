@@ -18,8 +18,15 @@ from matching.matcher import find_best_match, DEFAULT_THRESHOLD
 DOMAIN = "venbud.ua"
 AJAX_URL = "https://venbud.ua/index.php?route=octemplates/module/oct_live_search"
 
-# Price pattern: "1 023.67 ₴" or "1 023.67 грн"
-_PRICE_RE = re.compile(r'(\d[\d\s]*(?:[.,]\d{1,2})?)\s*(?:₴|грн\.?|UAH)', re.IGNORECASE)
+# Price pattern: "1 023.67 ₴" or "1 023.67 грн".
+# Strict integer part: a plain digit run OR 1-3 digits followed by groups of
+# exactly three. Rejects malformed "1 023 67" which the old greedy [\d\s]*
+# pattern parsed as 102367 (same hardening as _PRICE_LINE_RE in
+# _scrapling_base.py).
+_PRICE_RE = re.compile(
+    r'((?:\d{1,3}(?:\s\d{3})+|\d+)(?:[.,]\d{1,2})?)\s*(?:₴|грн\.?|UAH)',
+    re.IGNORECASE,
+)
 
 
 def _fetch_ajax_search(query: str):
@@ -58,43 +65,48 @@ def _parse_ajax_results(html: str, label: str):
     if not html or len(html) < 50:
         return None, None
 
-    # Extract product items from the HTML
-    # Each item has: title link, price, SKU code, product URL
-    items = re.findall(
-        r'<a[^>]*href="([^"]*)"[^>]*class="ds-livesearch-item-title[^"]*"[^>]*>([^<]+)</a>',
-        html
+    # Each result card: title link, then price / SKU inside the same block.
+    # Parse per-card SEGMENTS (this title → next title) instead of zipping
+    # three independent findall() lists: a card without a price div used to
+    # shift every later price onto the wrong product.
+    title_re = re.compile(
+        r'<a[^>]*href="([^"]*)"[^>]*class="ds-livesearch-item-title[^"]*"[^>]*>([^<]+)</a>'
+    )
+    price_re = re.compile(r'<div[^>]*class="ds-price-new[^"]*"[^>]*>([^<]+)</div>')
+    sku_re = re.compile(
+        r'class="ds-livesearch-item-code[^"]*"[^>]*>[^<]*<span>[^<]*</span>\s*(\d+)'
     )
 
-    if not items:
+    title_matches = list(title_re.finditer(html))
+    if not title_matches:
         return None, None
 
-    # Extract prices - they appear as "1 023.67 ₴" in .ds-price-new
-    prices = re.findall(
-        r'<div[^>]*class="ds-price-new[^"]*"[^>]*>([^<]+)</div>',
-        html
-    )
-
-    # Extract SKU codes - format: <span>Код товару: </span>20118
-    skus = re.findall(
-        r'class="ds-livesearch-item-code[^"]*"[^>]*>[^<]*<span>[^<]*</span>\s*(\d+)',
-        html
-    )
-
-    # Build candidates
     candidates = []
-    for i, (url, name) in enumerate(items):
-        name = name.strip()
-        price = None
-        if i < len(prices):
-            price_text = prices[i].strip()
-            price = parse_price(price_text)
+    for idx, tm in enumerate(title_matches):
+        url = tm.group(1)
+        name = tm.group(2).strip()
+        seg_end = title_matches[idx + 1].start() if idx + 1 < len(title_matches) else len(html)
+        segment = html[tm.end():seg_end]
 
-        sku = None
-        if i < len(skus):
-            sku = skus[i].strip()
+        pm = price_re.search(segment)
+        price = parse_price(pm.group(1).strip()) if pm else None
+        sm = sku_re.search(segment)
+        sku = sm.group(1).strip() if sm else None
 
         if price and price > 0:
             candidates.append((name, price, url, sku))
+
+    if not candidates:
+        # Layout fallback: if segmentation found no prices but the counts of
+        # titles and prices align exactly, fall back to positional pairing
+        # (pre-fix behaviour) so an unexpected markup order doesn't blank
+        # the supplier entirely.
+        prices = price_re.findall(html)
+        if prices and len(prices) == len(title_matches):
+            for i, tm in enumerate(title_matches):
+                price = parse_price(prices[i].strip())
+                if price and price > 0:
+                    candidates.append((tm.group(2).strip(), price, tm.group(1), None))
 
     if not candidates:
         return None, None
@@ -131,28 +143,40 @@ def scrape(supplier, label, log, saved_url=None):
         try:
             page = fetch_html(saved_url, timeout=45)
             text = page.get_all_text() or ""
-            price_match = _PRICE_RE.search(text)
-            if price_match:
-                price = parse_price(price_match.group(1))
-                if price and price > 0:
-                    h1 = page.css("h1")
-                    name = _text_of(h1[0]) if h1 and len(h1) > 0 else label
-                    if score_title(name, label) < DEFAULT_THRESHOLD:
-                        log(f"  → сторінка не збігається з товаром «{label[:40]}» (заголовок: {name[:40]})")
-                    else:
-                        log(f"  ✓ Знайдено за посиланням: {name[:60]} — {price} ₴")
-                        return {
-                            "name": name,
-                            "price": price,
-                            "currency": "UAH",
-                            "unit": None,
-                            "brand": None,
-                            "sku": None,
-                            "specs": None,
-                            "supplier": "Вен Буд",
-                            "url": saved_url,
-                            "date_scraped": date.today().isoformat(),
-                        }, saved_url
+            # Line-by-line scan: skip delivery banners ("Безкоштовна доставка
+            # від 600 грн") and trivial amounts, so a header banner can't be
+            # mistaken for the product price (the old whole-page .search()
+            # took the FIRST price on the page).
+            price = None
+            for _line in text.split("\n"):
+                _line = _line.strip()
+                if not _line or "доставк" in _line.lower():
+                    continue
+                m = _PRICE_RE.search(_line)
+                if m:
+                    p = parse_price(m.group(1))
+                    if p and p > 10:
+                        price = p
+                        break
+            if price:
+                h1 = page.css("h1")
+                name = _text_of(h1[0]) if h1 and len(h1) > 0 else label
+                if score_title(name, label) < DEFAULT_THRESHOLD:
+                    log(f"  → сторінка не збігається з товаром «{label[:40]}» (заголовок: {name[:40]})")
+                else:
+                    log(f"  ✓ Знайдено за посиланням: {name[:60]} — {price} ₴")
+                    return {
+                        "name": name,
+                        "price": price,
+                        "currency": "UAH",
+                        "unit": None,
+                        "brand": None,
+                        "sku": None,
+                        "specs": None,
+                        "supplier": "Вен Буд",
+                        "url": saved_url,
+                        "date_scraped": date.today().isoformat(),
+                    }, saved_url
         except Exception as exc:
             log(f"  → помилка ({exc})")
         log("  → переходимо до пошуку")

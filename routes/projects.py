@@ -139,7 +139,7 @@ def export_project(project_id):
     """Export project items to Excel with estimate vs best-price comparison."""
     import pandas as pd
     from openpyxl.styles import Font, PatternFill, Alignment
-    from suppliers import SUPPLIERS
+    from core.suppliers import SUPPLIERS
 
     project = get_project(project_id)
     if not project:

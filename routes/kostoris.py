@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request
-from core.item_db import add_item, batch_add_items
+from core.item_db import add_item, batch_add_items, create_project
 from parsers.kostoris_parser import parse as parse_kostoris
 
 bp = Blueprint("kostoris", __name__)
@@ -85,11 +85,25 @@ def kostoris_parse():
 
 @bp.route("/api/kostoris/import", methods=["POST"])
 def kostoris_import():
+    """Save selected parse rows into the DB, preserving file order.
+
+    Body:
+      items:            ordered rows from /api/kostoris/parse
+      project_id:       link the selection to an existing project, OR
+      new_project_name: create a project first and link to it
+      filename:         stored as the project's avk_file (with new_project_name)
+    """
     payload    = request.json
     project_id = (payload.get("project_id") or "").strip() or None
+    new_name   = (payload.get("new_project_name") or "").strip()
     raw        = payload.get("items") or [{"name": n} for n in payload.get("names", [])]
     if not raw:
         return jsonify({"error": "Немає вибраних позицій"}), 400
+
+    project = None
+    if new_name:
+        project = create_project(new_name, avk_file=(payload.get("filename") or None))
+        project_id = project["id"]
 
     entries = [
         {
@@ -104,5 +118,11 @@ def kostoris_import():
         for e in raw if (e.get("name") or "").strip()
     ]
 
-    added, skipped = batch_add_items(entries, project_id=project_id)
-    return jsonify({"added": added, "skipped": skipped, "project_id": project_id})
+    added, linked, skipped = batch_add_items(entries, project_id=project_id)
+    return jsonify({
+        "added":        added,
+        "linked":       linked,
+        "skipped":      skipped,
+        "project_id":   project_id,
+        "project_name": project["name"] if project else None,
+    })

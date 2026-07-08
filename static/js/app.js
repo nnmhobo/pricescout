@@ -24,6 +24,20 @@
   let monitorQueue  = [];
   let monitorDone   = 0;
   let monitorMode   = 'single';
+  let monitorProjectId = null;   // selected project in the "Проекти" monitor mode
+  let importFilename   = '';     // name of the last parsed кошторис file
+  // User-arranged supplier priority for the single-price mode (persisted).
+  let supplierOrder = [];
+  try { supplierOrder = JSON.parse(localStorage.getItem('supplierOrder') || '[]'); } catch (e) {}
+  // Черга and Проекти keep SEPARATE queues; monitorQueue always points at the
+  // active mode's array (swapped in setMonitorMode). runningMode = the mode
+  // that owns the active/last batch run — only it shows the log/progress/stop.
+  let modeQueues = { batch: monitorQueue, project: [] };
+  let runningMode = null;
+  let singleRunning = false;
+  let batchRunning  = false;
+  let batchStopped  = false;
+  let batchStartTime = 0;
   // Server-reported absolute caps for batch parallelism. Fetched at boot.
   let serverConfig  = { max_parallel_items: 5, default_parallel_items: 3 };
   // Availability data cache
@@ -157,17 +171,51 @@
       .map(c => c.id.replace('chk-', ''));
   }
 
+  // Sidebar supplier toggle — locked while any monitoring is active, because
+  // the enabled set feeds the routing AND the supplier-order box.
+  function onSupplierToggle(cb) {
+    if (batchRunning || singleRunning) { cb.checked = !cb.checked; return; }
+    saveSupplierSelection();
+    renderMonitorTab();
+  }
+
   function toggleAllSuppliers() {
+    if (batchRunning || singleRunning) return;   // locked during a run
     const checkboxes = [...document.querySelectorAll('[id^="chk-"]:not(:disabled)')];
     const anyOn = checkboxes.some(c => c.checked);
     checkboxes.forEach(c => { c.checked = !anyOn; });
     const btn = document.getElementById('btn-sup-all');
     if (btn) btn.textContent = anyOn ? 'Увімкнути всі' : 'Вимкнути всі';
+    saveSupplierSelection();
     if (document.getElementById('queue-count')) renderMonitorTab();
+  }
+
+  // ── Supplier selection persistence ────────────────────────────
+  // The sidebar is rendered all-checked by the template on every page load;
+  // persist the user's actual selection so a reload doesn't reset it (and
+  // with it, the supplier-order box).
+  function saveSupplierSelection() {
+    try { localStorage.setItem('activeSuppliers', JSON.stringify(getEnabledIds())); } catch (e) {}
+  }
+
+  function _applySupplierSelection(ids) {
+    if (!Array.isArray(ids)) return;
+    document.querySelectorAll('[id^="chk-"]').forEach(c => {
+      if (c.id === 'chk-all' || c.disabled) return;
+      c.checked = ids.includes(c.id.replace('chk-', ''));
+    });
+  }
+
+  function restoreSupplierSelection() {
+    let ids = null;
+    try { ids = JSON.parse(localStorage.getItem('activeSuppliers') || 'null'); } catch (e) {}
+    if (Array.isArray(ids)) _applySupplierSelection(ids);
   }
 
   initTheme();
   loadItems();
+  restoreSearchOpts();        // search-mode checkboxes persist across reloads
+  restoreSupplierSelection(); // sidebar supplier toggles persist across reloads
 
   // Fetch the server's parallelism caps and rebuild the "Паралельно" select
   // so the user can pick up to MAX_PARALLEL_ITEMS items at once.
@@ -184,6 +232,9 @@
       if (n === def) opt.selected = true;
       sel.appendChild(opt);
     }
+    // The rebuild above resets the selection to the default — re-apply the
+    // saved preference (or the active run's values, whichever is pending).
+    applyBatchControls();
   }).catch(() => {});
 
   // ── Resume active run on page reload ─────────────────────────
@@ -207,7 +258,27 @@
         const monBtn = Array.from(document.querySelectorAll('.nav-btn'))
           .find(b => b.textContent.trim() === 'Моніторинг');
         showPanel('monitor', monBtn);
-        setMonitorMode('batch');   // sets correct tab highlight + shows batch panel
+        if (d.project_id) monitorProjectId = d.project_id;
+        runningMode = d.project_id ? 'project' : 'batch';
+        setMonitorMode(runningMode);   // sets correct tab highlight + shows batch panel
+        // Restore + lock the run's options (they live server-side for the
+        // duration of the run, so a reload can't lose them).
+        if (d.run_options) {
+          const o = d.run_options;
+          const se = document.getElementById('opt-single-price');  if (se) se.checked = !!o.single_price;
+          const be = document.getElementById('opt-best-price');    if (be) be.checked = !!o.best_price;
+          const fe = document.getElementById('opt-fill-missing');  if (fe) fe.checked = !!o.fill_missing;
+          // The run's supplier set wins over localStorage — the sidebar must
+          // show exactly what this run is using (and stays locked).
+          if (Array.isArray(o.active_suppliers) && o.active_suppliers.length) {
+            _applySupplierSelection(o.active_suppliers);
+          }
+          onSearchOptsChange();
+        }
+        // Show the run's parallel/limit values in the (locked) controls.
+        pendingRunControls = { parallel: d.parallel_items, limit: d.limit, total: d.total_items };
+        applyBatchControls();
+        updateRunLockUI();
         document.getElementById('batch-log-wrap').style.display = 'flex';
         document.getElementById('btn-run-batch').disabled = true;
         const stopBtn = document.getElementById('btn-stop-batch');
@@ -219,8 +290,11 @@
         // Restore monitorQueue from the item_ids the server still knows about
         if (d.item_ids && d.item_ids.length) {
           fetch('/api/items').then(r => r.json()).then(allItems => {
-            const idSet = new Set(d.item_ids);
-            monitorQueue = allItems.filter(i => idSet.has(i.id));
+            const byId = new Map(allItems.map(i => [i.id, i]));
+            // Preserve the run's item order (matters for project runs).
+            const q = d.item_ids.map(id => byId.get(id)).filter(Boolean);
+            modeQueues[runningMode] = q;
+            if (monitorMode === runningMode) monitorQueue = q;
             monitorDone  = d.done_items ?? 0;
             renderMonitorTab();
           }).catch(() => {});
@@ -232,19 +306,26 @@
             await new Promise(r => setTimeout(r, 1500));
             const s = await fetch('/api/status?log_offset=' + lastLogLen).then(r => r.json());
             updateDot(s);
+            updateRunBadges(s);
             if (s.log && s.log.length) appendBatchLog(s.log);
             if (s.total_items) updateBatchProgress(s.done_items ?? 0, s.total_items, s.batch_started_at);
+            _updateQueueDoneCounter(s.done_items ?? 0);
             lastLogLen = s.log_total ?? (lastLogLen + (s.log || []).length);
             if (!s.running) break;   // wait for server to confirm fully stopped
           }
           batchRunning = false;
           batchStopped = false;
+          pendingRunControls = null;
+          updateRunLockUI();
           _stopElapsedTick();
           document.getElementById('btn-run-batch').disabled = false;
           document.getElementById('btn-stop-batch-wrap').style.display = 'none';
-          // Refresh queue items with final state (prices, last_checked, etc.)
+          // Refresh THE RUN'S queue with final state (prices, last_checked).
           const updatedItems = await fetch('/api/items').then(r => r.json());
-          monitorQueue = monitorQueue.map(q => ({...(updatedItems.find(u => u.id === q.id) || q), _done: true}));
+          const doneQ = (modeQueues[runningMode] || monitorQueue)
+            .map(q => ({...(updatedItems.find(u => u.id === q.id) || q), _done: true}));
+          modeQueues[runningMode] = doneQ;
+          if (monitorMode === runningMode) monitorQueue = doneQ;
           const finalResults = await fetch('/api/results').then(r => r.json());
           if (finalResults && finalResults.length > 0) {
             loadResults(); setExcelBtn(true);
@@ -256,9 +337,17 @@
         })();
       } else {
         // ── Reconnect to a running single-item scrape ─────────────────
+        singleRunning = true;
+        if (d.run_options && Array.isArray(d.run_options.active_suppliers)
+            && d.run_options.active_suppliers.length) {
+          _applySupplierSelection(d.run_options.active_suppliers);
+        }
+        updateRunLockUI();
         document.getElementById('run-btn').disabled = true;
         document.getElementById('stop-btn').style.display = '';
-        showPanel('log', document.querySelector('.nav-btn'));
+        const monBtn2 = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Моніторинг'));
+        showPanel('monitor', monBtn2);
+        setMonitorMode('single');
         poll();
       }
     }
@@ -278,6 +367,7 @@
   fetch('/api/kostoris/last').then(r => r.json()).then(d => {
     if (!d || !d.items || !d.items.length) return;
     importItems = d.items;
+    importFilename = d.filename || '';
     selectedNames = new Set(d.items.map(i => i.name));
     document.getElementById('imp-total').textContent  = d.total;
     document.getElementById('imp-sel').textContent    = selectedNames.size;
@@ -295,6 +385,9 @@
 
   // ── Scrape ───────────────────────────────────────────────────
   function startScrape() {
+    // One monitoring at a time — a batch/project run blocks single scrapes.
+    if (batchRunning) { alert('Дочекайтеся завершення поточного моніторингу'); return; }
+    if (singleRunning) return;
     const label = document.getElementById('cat-input').value.trim();
     if (!label) { shake('cat-input'); return; }
 
@@ -309,12 +402,6 @@
 
     // Clear log window
     document.getElementById('t-body').innerHTML = '';
-
-    // Show item banner in Журнал panel
-    const logBanner = document.getElementById('log-item-banner');
-    const logLabel  = document.getElementById('log-item-label');
-    const logStatus = document.getElementById('log-item-status');
-    if (logBanner) { logLabel.textContent = label; logStatus.textContent = 'Виконується…'; logBanner.style.display = 'flex'; }
 
     // Show item banner in Моніторинг > Один матеріал panel
     const monBanner  = document.getElementById('single-item-banner');
@@ -331,17 +418,49 @@
     }).then(r => r.json()).then(d => {
       if (d.error) { alert(d.error); return; }
       if (d.item_id) activeItemId = d.item_id;
+      singleRunning = true;
+      updateRunLockUI();
       document.getElementById('run-btn').disabled = true;
       document.getElementById('stop-btn').style.display = '';
       document.getElementById('stop-btn').disabled = false;
       document.getElementById('stop-btn').textContent = '◼ Зупинити';
       setExcelBtn(false);
-      showPanel('log', document.querySelector('.nav-btn'));
+      const monBtn = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Моніторинг'));
+      showPanel('monitor', monBtn);
+      setMonitorMode('single');
       poll();
     });
   }
 
   // ── Poll ─────────────────────────────────────────────────────
+  // Mirror the run-label / last-run date chips from an /api/status payload.
+  // poll() does this inline for single runs; the batch poll loops call this
+  // so the Results-tab badges and the sidebar "Останній запуск" don't keep
+  // showing the previous run until a page refresh.
+  function updateRunBadges(d) {
+    if (d.last_run) {
+      document.getElementById('last-run').textContent   = 'Останній запуск: ' + d.last_run;
+      document.getElementById('badge-date').textContent = d.last_run;
+      document.getElementById('log-sub').textContent    = d.last_run;
+    }
+    if (d.label) {
+      const bl = document.getElementById('badge-label');
+      bl.textContent = d.label; bl.style.display = '';
+    }
+  }
+
+  // Live "Перевірено" counter — called on every batch poll tick so the
+  // toolbar count moves during the run, not only after a reload.
+  // Cheap direct write; a full renderMonitorTab() per tick would rebuild
+  // the whole queue table (hundreds of rows) every 1.5 s.
+  function _updateQueueDoneCounter(done) {
+    monitorDone = done;
+    if (monitorMode === runningMode) {
+      const c = document.getElementById('queue-done');
+      if (c) c.textContent = done;
+    }
+  }
+
   function poll() {
     fetch('/api/status').then(r => r.json()).then(d => {
       renderLog(d.log);
@@ -362,13 +481,13 @@
       if (d.running) {
         setTimeout(poll, 1200);
       } else {
+        singleRunning = false;
+        updateRunLockUI();
         document.getElementById('run-btn').disabled = false;
         document.getElementById('stop-btn').style.display = 'none';
-        // Update banners with result count
+        // Update banner with result count
         const statusText = d.count > 0 ? d.count + ' результатів' : 'Не знайдено';
-        const logStatus = document.getElementById('log-item-status');
         const monStatus = document.getElementById('single-item-status');
-        if (logStatus) logStatus.textContent = statusText;
         if (monStatus) monStatus.textContent = statusText;
         // Always load results (covers manual stop with partial results)
         if (d.count > 0) {
@@ -699,6 +818,7 @@
           return;
         }
         importItems = d.items;
+        importFilename = file.name;
         selectedNames = new Set(importItems.map(i => i.name));
         document.getElementById('imp-total').textContent = d.total;
         document.getElementById('import-stats-row').style.display = '';
@@ -814,18 +934,37 @@
         unit_price: i.unit_price,
       }));
     const projectSel = document.getElementById('import-project-select');
-    const project_id = projectSel ? (projectSel.value || null) : null;
+    const selVal = projectSel ? projectSel.value : '';
+    const body = { items, filename: importFilename || null };
+    if (selVal === '__new__') {
+      const name = (document.getElementById('import-new-project-name')?.value || '').trim();
+      if (!name) { shake('import-new-project-name'); return; }
+      body.new_project_name = name;
+    } else if (selVal) {
+      body.project_id = selVal;
+    }
+
     const d = await fetch('/api/kostoris/import', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ items, project_id })
+      body: JSON.stringify(body)
     }).then(r => r.json());
+    if (d.error) { alert(d.error); return; }
 
-    const skippedMsg = d.skipped ? `, вже існує: ${d.skipped}` : '';
-    const projMsg    = d.project_id ? ' → проект' : '';
-    document.getElementById('import-result').textContent = `Додано: ${d.added}${skippedMsg}${projMsg}`;
+    // linked = rows tied to the project (new AND already-existing items);
+    // skipped = empty / in-file duplicated rows.
+    const linkedMsg  = d.linked ? `, у проект: ${d.linked}` : '';
+    const skippedMsg = d.skipped ? `, пропущено: ${d.skipped}` : '';
+    const projMsg    = d.project_name ? ` → «${d.project_name}»` : (d.project_id ? ' → проект' : '');
+    document.getElementById('import-result').textContent = `Додано нових: ${d.added}${linkedMsg}${skippedMsg}${projMsg}`;
     loadItems();
-    if (d.added > 0) { loadItemsTab(); loadProjects(); }
+    loadItemsTab();
+    await loadProjects();
+    if (d.project_id && projectSel) {
+      projectSel.value = d.project_id;           // freshly created project stays selected
+      const inp = document.getElementById('import-new-project-name');
+      if (inp) { inp.style.display = 'none'; inp.value = ''; }
+    }
   }
 
   // ── Items DB tab ─────────────────────────────────────────────
@@ -1005,10 +1144,9 @@
     if (item) {
       document.getElementById('cat-input').value = label;
       activeItemId = id;
-      const chip = document.getElementById('log-item-label');
-      if (chip) { chip.textContent = label; chip.style.display = ''; }
-      const logBtn = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Журнал'));
-      showPanel('log', logBtn);
+      const monBtn = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Моніторинг'));
+      showPanel('monitor', monBtn);
+      setMonitorMode('single');
     }
   }
 
@@ -1052,18 +1190,91 @@
   // ── Monitoring ───────────────────────────────────────────────
 
   function setMonitorMode(mode) {
+    const paint = (id, active) => {
+      const b = document.getElementById(id);
+      if (!b) return;
+      b.style.background = active ? 'var(--gold)' : 'transparent';
+      b.style.color = active ? '#fff' : 'var(--ink3)';
+    };
+    const projBar = document.getElementById('monitor-project-bar');
+
     if (mode === 'single') {
-      const logBtn = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Журнал'));
-      showPanel('log', logBtn);
+      // Single mode hosts the execution journal (the former Журнал nav tab
+      // was removed) — swap sub-panels, no navigation.
+      monitorMode = 'single';
+      document.getElementById('monitor-single').style.display = 'flex';
+      document.getElementById('monitor-batch').style.display = 'none';
+      paint('mode-single', true);
+      paint('mode-batch', false);
+      paint('mode-project', false);
+      if (projBar) projBar.style.display = 'none';
       return;
     }
-    monitorMode = 'batch';
+
+    // 'batch' (ad-hoc queue) and 'project' (queue = one project's items in
+    // imported-file order) share the same batch panel BUT have separate
+    // queues — save the leaving mode's queue, load the target mode's own.
+    const prevMode = monitorMode;
+    monitorMode = mode === 'project' ? 'project' : 'batch';
+    if (prevMode === 'batch' || prevMode === 'project') modeQueues[prevMode] = monitorQueue;
+    monitorQueue = modeQueues[monitorMode] || [];
+
     document.getElementById('monitor-single').style.display = 'none';
     document.getElementById('monitor-batch').style.display = 'flex';
-    document.getElementById('mode-single').style.background = 'transparent';
-    document.getElementById('mode-single').style.color = 'var(--ink3)';
-    document.getElementById('mode-batch').style.background = 'var(--gold)';
-    document.getElementById('mode-batch').style.color = '#fff';
+    paint('mode-single', false);
+    paint('mode-batch', monitorMode === 'batch');
+    paint('mode-project', monitorMode === 'project');
+    if (projBar) projBar.style.display = monitorMode === 'project' ? 'flex' : 'none';
+
+    // The run's log / progress / stop button belong ONLY to the mode that
+    // started it — the other mode shows its own (idle) queue.
+    const ownsRun = runningMode === monitorMode;
+    const logWrap = document.getElementById('batch-log-wrap');
+    const hasLog  = (document.getElementById('batch-log-body')?.childElementCount || 0) > 0;
+    if (logWrap) logWrap.style.display = (ownsRun && (batchRunning || hasLog)) ? 'flex' : 'none';
+    const stopWrap = document.getElementById('btn-stop-batch-wrap');
+    if (stopWrap) stopWrap.style.display = (ownsRun && batchRunning) ? '' : 'none';
+    updateRunLockUI();
+
+    if (monitorMode === 'project') populateMonitorProjectSelect();
+    renderMonitorTab();
+  }
+
+  async function populateMonitorProjectSelect() {
+    const sel = document.getElementById('monitor-project-select');
+    if (!sel) return;
+    if (!allProjects.length) {
+      try { allProjects = await fetch('/api/projects').then(r => r.json()); } catch (e) {}
+    }
+    const cur = monitorProjectId || sel.value;
+    sel.innerHTML = '<option value="">— оберіть проект —</option>' +
+      allProjects.map(p => `<option value="${esc(p.id)}" ${p.id === cur ? 'selected' : ''}>${esc(p.name)} (${p.item_count} поз.)</option>`).join('');
+    // Auto-load the queue for the pre-selected project — but never while a
+    // batch is running/reconnecting (the reconnect path restores the queue
+    // from the server's item_ids, which respects the run's limit).
+    if (cur && sel.value === cur && !monitorQueue.length && !batchRunning) onMonitorProjectChange();
+  }
+
+  async function onMonitorProjectChange() {
+    const sel = document.getElementById('monitor-project-select');
+    monitorProjectId = (sel && sel.value) || null;
+    const info = document.getElementById('monitor-project-info');
+    if (!monitorProjectId) {
+      _setActiveQueue([]);
+      monitorDone = 0;
+      if (info) info.textContent = '';
+      renderMonitorTab();
+      return;
+    }
+    try {
+      // Backend returns items in the imported file's row order (position).
+      const items = await fetch(`/api/projects/${monitorProjectId}/items`).then(r => r.json());
+      _setActiveQueue(Array.isArray(items) ? items : []);
+      monitorDone = 0;
+      if (info) info.textContent = `${monitorQueue.length} матеріалів у порядку кошторису`;
+    } catch (e) {
+      if (info) info.textContent = 'Не вдалося завантажити проект';
+    }
     renderMonitorTab();
   }
 
@@ -1095,12 +1306,188 @@
     const mode = document.getElementById('batch-count-mode').value;
     const custom = document.getElementById('batch-count-custom');
     custom.style.display = mode === 'custom' ? '' : 'none';
+    saveBatchControls();
     renderMonitorTab();
   }
 
   function onBatchCountCustomInput() {
     // Re-render on every keystroke so the time estimate tracks the live value.
+    saveBatchControls();
     renderMonitorTab();
+  }
+
+  function onBatchParallelChange() {
+    saveBatchControls();
+    renderMonitorTab();
+  }
+
+  // ── Batch controls persistence (Паралельно + К-сть товарів) ──
+  // Saved ONLY from the explicit change handlers above — never from
+  // render passes, which would overwrite the stored value with the
+  // template default before restoration happens.
+  function saveBatchControls() {
+    try {
+      const sel = document.getElementById('batch-parallel');
+      if (sel) localStorage.setItem('batchParallel', sel.value);
+      const modeSel = document.getElementById('batch-count-mode');
+      const custom  = document.getElementById('batch-count-custom');
+      if (modeSel) localStorage.setItem('batchLimit', JSON.stringify({
+        mode: modeSel.value, custom: custom ? custom.value : '',
+      }));
+    } catch (e) {}
+  }
+
+  // Values reported by /api/status for an ACTIVE run — they win over the
+  // saved preferences until the run ends.
+  let pendingRunControls = null;
+
+  function applyBatchControls() {
+    const sel     = document.getElementById('batch-parallel');
+    const modeSel = document.getElementById('batch-count-mode');
+    const custom  = document.getElementById('batch-count-custom');
+    if (pendingRunControls) {
+      const p = String(pendingRunControls.parallel || '');
+      if (sel && p && [...sel.options].some(o => o.value === p)) sel.value = p;
+      if (modeSel && pendingRunControls.limit && pendingRunControls.total
+          && pendingRunControls.limit < pendingRunControls.total) {
+        modeSel.value = 'custom';
+        if (custom) { custom.value = pendingRunControls.limit; custom.style.display = ''; }
+      }
+    } else {
+      try {
+        const p = localStorage.getItem('batchParallel');
+        if (p && sel && [...sel.options].some(o => o.value === p)) sel.value = p;
+        const lm = JSON.parse(localStorage.getItem('batchLimit') || 'null');
+        if (lm && modeSel) {
+          if ([...modeSel.options].some(o => o.value === lm.mode)) modeSel.value = lm.mode;
+          if (custom) {
+            if (lm.custom) custom.value = lm.custom;
+            custom.style.display = modeSel.value === 'custom' ? '' : 'none';
+          }
+        }
+      } catch (e) {}
+    }
+    renderMonitorTab();
+  }
+
+  // ── Search-mode options (одна ціна / найменша / ціна 0) ──────
+  function onSearchOptsChange() {
+    const single    = document.getElementById('opt-single-price')?.checked || false;
+    const bestEl    = document.getElementById('opt-best-price');
+    const bestLabel = document.getElementById('opt-best-price-label');
+    if (bestEl) {
+      bestEl.disabled = batchRunning || !single;
+      if (!single) bestEl.checked = false;   // "найменша" only makes sense for one price
+    }
+    if (bestLabel) bestLabel.style.opacity = single ? '1' : '0.4';
+    saveSearchOpts();
+    renderSupplierOrderBox();
+  }
+
+  // Active suppliers (sidebar toggles) arranged by the user's saved priority;
+  // newly enabled suppliers append at the end in sidebar order.
+  function getOrderedActiveSuppliers() {
+    const enabled = getEnabledIds();
+    const known = supplierOrder.filter(id => enabled.includes(id));
+    const rest  = enabled.filter(id => !known.includes(id));
+    return known.concat(rest);
+  }
+
+  function renderSupplierOrderBox() {
+    const box = document.getElementById('supplier-order-box');
+    if (!box) return;
+    const single = document.getElementById('opt-single-price')?.checked || false;
+    const best   = document.getElementById('opt-best-price')?.checked || false;
+    // Visible only when we need ONE price WITHOUT best-price comparison —
+    // then the probing order decides which supplier's price wins.
+    const show = single && !best;
+    box.style.display = show ? 'flex' : 'none';
+    if (!show) return;
+    const ordered = getOrderedActiveSuppliers();
+    const list = document.getElementById('supplier-order-list');
+    if (!list) return;
+    list.innerHTML = ordered.map((id, i) => `
+      <div style="display:flex;align-items:center;gap:5px;padding:3px 6px;background:var(--paper);border:1px solid var(--border);border-radius:var(--r)">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--ink3)">${i + 1}.</span>
+        <span style="font-size:11px">${esc(SUPPLIER_NAMES[id] || id)}</span>
+        <button onclick="moveSupplierOrder('${id}',-1)" ${(batchRunning || singleRunning || i === 0) ? 'disabled' : ''}
+                style="background:none;border:none;cursor:pointer;color:var(--ink3);font-size:11px;padding:0 2px" title="Раніше">◀</button>
+        <button onclick="moveSupplierOrder('${id}',1)" ${(batchRunning || singleRunning || i === ordered.length - 1) ? 'disabled' : ''}
+                style="background:none;border:none;cursor:pointer;color:var(--ink3);font-size:11px;padding:0 2px" title="Пізніше">▶</button>
+      </div>`).join('') ||
+      '<span style="font-size:11px;color:var(--ink3)">Немає активних постачальників — увімкніть їх у лівій панелі</span>';
+  }
+
+  function moveSupplierOrder(id, dir) {
+    if (batchRunning || singleRunning) return;   // order is locked during a run
+    const ordered = getOrderedActiveSuppliers();
+    const i = ordered.indexOf(id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= ordered.length) return;
+    [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
+    supplierOrder = ordered;
+    try { localStorage.setItem('supplierOrder', JSON.stringify(supplierOrder)); } catch (e) {}
+    renderSupplierOrderBox();
+  }
+
+  // ── Run lock + option persistence ─────────────────────────────
+  function _setActiveQueue(arr) {
+    monitorQueue = arr;
+    if (monitorMode === 'project') modeQueues.project = arr;
+    else modeQueues.batch = arr;
+  }
+
+  function saveSearchOpts() {
+    try {
+      localStorage.setItem('searchOpts', JSON.stringify({
+        single: document.getElementById('opt-single-price')?.checked || false,
+        best:   document.getElementById('opt-best-price')?.checked || false,
+        fill:   document.getElementById('opt-fill-missing')?.checked || false,
+      }));
+    } catch (e) {}
+  }
+
+  function restoreSearchOpts() {
+    let o = null;
+    try { o = JSON.parse(localStorage.getItem('searchOpts') || 'null'); } catch (e) {}
+    if (!o) return;
+    const se = document.getElementById('opt-single-price');
+    const be = document.getElementById('opt-best-price');
+    const fe = document.getElementById('opt-fill-missing');
+    if (se) se.checked = !!o.single;
+    if (be) be.checked = !!o.best;
+    if (fe) fe.checked = !!o.fill;
+    onSearchOptsChange();
+  }
+
+  // Disable everything that must not change while a run is active:
+  // the option checkboxes, the project selector, the supplier order and
+  // the run buttons of ALL modes (one monitoring at a time).
+  function updateRunLockUI() {
+    const lock = batchRunning || singleRunning;
+    const single = document.getElementById('opt-single-price');
+    const best   = document.getElementById('opt-best-price');
+    const fill   = document.getElementById('opt-fill-missing');
+    if (single) single.disabled = lock;
+    if (best)   best.disabled = lock || !(single && single.checked);
+    if (fill)   fill.disabled = lock;
+    const projSel = document.getElementById('monitor-project-select');
+    if (projSel) projSel.disabled = lock;
+    ['batch-parallel', 'batch-count-mode', 'batch-count-custom'].forEach(cid => {
+      const c = document.getElementById(cid);
+      if (c) c.disabled = lock;
+    });
+    const sideBtn = document.getElementById('run-btn');
+    if (sideBtn) sideBtn.disabled = lock;
+    // Sidebar supplier toggles: NOT via `disabled` (that flag marks
+    // not-implemented suppliers and getEnabledIds() filters on it) —
+    // pointer-events + the onSupplierToggle() guard do the locking.
+    const supSection = document.getElementById('suppliers-section');
+    if (supSection) {
+      supSection.style.pointerEvents = lock ? 'none' : '';
+      supSection.style.opacity = lock ? '0.55' : '';
+    }
+    renderSupplierOrderBox();
   }
 
   function renderMonitorTab() {
@@ -1112,15 +1499,25 @@
     const qLen   = monitorQueue.length;
     const supCnt = getEnabledIds().length;
     el('queue-count').textContent = qLen;
-    el('queue-done').textContent  = monitorDone;
+    // "Перевірено" shows the live counter only in the mode that owns the
+    // run; the other mode counts its own queue's _done flags.
+    el('queue-done').textContent  = (runningMode && monitorMode !== runningMode)
+      ? monitorQueue.filter(i => i._done).length
+      : monitorDone;
     if (el('queue-sups')) el('queue-sups').textContent = supCnt || '—';
 
     // Category-aware estimate: categories with HVAC/automation/electrical get fewer suppliers
     // Mirrors category_routing.py logic on the frontend
-    const SKIP_CATS = new Set([
+    const monitorAll = !!serverConfig.monitor_all_items;
+    // HVAC categories route to ТеплоДім (+ marketplaces) — they ARE searched.
+    const HVAC_CATS = new Set([
       'Теплопостачання та опалення','Вентиляція та кондиціонування',
-      'Теплотехнічне устаткування','Автоматизація (КВП)',
-      'Енергоносії','Спеціальні роботи',
+      'Теплотехнічне устаткування'
+    ]);
+    // Explicit-skip categories: no retail supplier carries them. With
+    // MONITOR_ALL_ITEMS the backend falls back to all general suppliers.
+    const SKIP_CATS = new Set([
+      'Автоматизація (КВП)','Енергоносії','Спеціальні роботи',
       'Вантажопідйомне устаткування','Інше устаткування'
     ]);
     const REDUCED_CATS = new Set([
@@ -1139,7 +1536,8 @@
     for (const item of itemsToRun) {
       const cat = item.category || '';
       let sups;
-      if (SKIP_CATS.has(cat))          sups = 0;
+      if (HVAC_CATS.has(cat))          sups = Math.min(supCnt, 3);
+      else if (SKIP_CATS.has(cat))     sups = monitorAll ? supCnt : 0;
       else if (REDUCED_CATS.has(cat))  sups = Math.min(supCnt, 3);
       else if (PLUMBING_CATS.has(cat)) sups = Math.min(supCnt, 6);
       else                              sups = supCnt;
@@ -1149,15 +1547,20 @@
     const mins = Math.ceil(totalSecs / 60 / Math.max(1, parallel));
     el('queue-time').textContent = itemsToRun.length ? `~${mins}` : '—';
 
-    el('btn-run-batch').disabled = qLen === 0 || itemsToRun.length === 0;
+    // One monitoring at a time: any active run (batch, project or single)
+    // disables the Run button in every mode.
+    el('btn-run-batch').disabled = batchRunning || singleRunning || qLen === 0 || itemsToRun.length === 0;
 
     el('monitor-tbody').innerHTML = filtered.map((item, idx) => {
       const prices  = Object.values(item.suppliers || {}).filter(s => s.found && s.last_price).map(s => s.last_price);
       const best    = prices.length ? Math.min(...prices).toLocaleString('uk-UA') + ' ₴' : '—';
       const checked = Object.values(item.suppliers || {}).map(s => s.last_checked).filter(Boolean).sort().reverse()[0] || '—';
       const done    = item._done;
-      const SKIP_CATS_ROW = new Set(['Теплопостачання та опалення','Вентиляція та кондиціонування','Теплотехнічне устаткування','Автоматизація (КВП)','Енергоносії','Спеціальні роботи','Вантажопідйомне устаткування','Інше устаткування']);
-      const willSearch = item.monitorable !== false && !SKIP_CATS_ROW.has(item.category || '');
+      // HVAC categories are NOT listed — they route to ТеплоДім and are
+      // searched. With MONITOR_ALL_ITEMS on, nothing is category-skipped
+      // (the backend falls back to all general suppliers).
+      const SKIP_CATS_ROW = new Set(['Автоматизація (КВП)','Енергоносії','Спеціальні роботи','Вантажопідйомне устаткування','Інше устаткування']);
+      const willSearch = item.monitorable !== false && (monitorAll || !SKIP_CATS_ROW.has(item.category || ''));
       const inLimit    = willRunIds.has(item.id);
       const monBadge = !inLimit
         ? '<span style="font-size:9px;padding:1px 5px;background:#f0ede8;color:var(--ink3);border-radius:3px" title="Поза межами обраної к-сті">поза лімітом</span>'
@@ -1175,16 +1578,21 @@
         <td><button onclick="removeFromQueue('${item.id}')" style="background:none;border:none;cursor:pointer;color:var(--ink3);font-size:12px;padding:2px 4px" title="Видалити">✕</button></td>
       </tr>`;
     }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--ink3);padding:32px;font-size:13px">Черга порожня — додайте матеріали з Бази матеріалів</td></tr>';
+    // Keep the supplier-priority box in sync with the sidebar toggles.
+    renderSupplierOrderBox();
   }
 
   function addToQueue(item, skipRender = false) {
-    if (monitorQueue.find(i => i.id === item.id)) return;
-    monitorQueue.push(item);
+    // Items-tab additions always target the Черга queue (not Проекти).
+    if (modeQueues.batch.find(i => i.id === item.id)) return;
+    modeQueues.batch.push(item);
+    if (monitorMode === 'batch') monitorQueue = modeQueues.batch;
     if (!skipRender) renderMonitorTab();
   }
 
   function removeFromQueue(id) {
-    monitorQueue = monitorQueue.filter(i => i.id !== id);
+    if (batchRunning && runningMode === monitorMode) return;  // locked during its run
+    _setActiveQueue(monitorQueue.filter(i => i.id !== id));
     renderMonitorTab();
   }
 
@@ -1195,14 +1603,14 @@
   }
 
   function clearQueue() {
-    monitorQueue = [];
+    if (batchRunning && runningMode === monitorMode) return;  // locked during its run
+    _setActiveQueue([]);
     monitorDone = 0;
     renderMonitorTab();
   }
 
-  let batchRunning  = false;
-  let batchStopped  = false;
-  let batchStartTime = 0;
+  // (batchRunning / batchStopped / batchStartTime are declared with the
+  // top-level globals — restoreSearchOpts() reads them during boot.)
   let _elapsedTimer  = null;
 
   function clearBatchLog() {
@@ -1284,11 +1692,14 @@
   async function runBatch() {
     if (!monitorQueue.length) return;
     if (batchRunning) return;
+    if (singleRunning) { alert('Дочекайтеся завершення поточного моніторингу'); return; }
     const activeSups = getEnabledIds().map(id => ({id, enabled: true}));
     if (!activeSups.length) { alert('Оберіть постачальників у лівій панелі'); return; }
 
     batchRunning = true;
     batchStopped = false;
+    runningMode  = monitorMode === 'project' ? 'project' : 'batch';
+    updateRunLockUI();
     batchStartTime = Date.now();
     document.getElementById('btn-run-batch').disabled = true;
     document.getElementById('btn-stop-batch-wrap').style.display = '';
@@ -1322,6 +1733,23 @@
       parallel_items: parallel,
     };
     if (limit > 0) payload.limit = limit;
+    // Project runs: backend keeps results in the file order and uses the
+    // project's per-item quantities for totals.
+    if (monitorMode === 'project' && monitorProjectId) {
+      payload.project_id = monitorProjectId;
+      const p = allProjects.find(pr => pr.id === monitorProjectId);
+      if (p) payload.label = `Проект: ${p.name}`;
+    }
+    // Search-mode options (одна ціна / найменша / ціна 0 для не знайдених).
+    const singlePrice = document.getElementById('opt-single-price')?.checked || false;
+    const bestPrice   = document.getElementById('opt-best-price')?.checked || false;
+    const fillMissing = document.getElementById('opt-fill-missing')?.checked || false;
+    if (singlePrice) {
+      payload.single_price = true;
+      if (bestPrice) payload.best_price = true;
+      else payload.supplier_order = getOrderedActiveSuppliers();
+    }
+    if (fillMissing) payload.fill_missing = true;
 
     const resp = await fetch('/api/scrape/batch', {
       method: 'POST',
@@ -1333,6 +1761,7 @@
       batchLog(`⚠ ${resp.error}`);
       batchRunning = false;
       batchStopped = false;
+      updateRunLockUI();
       document.getElementById('btn-run-batch').disabled = false;
       document.getElementById('btn-stop-batch-wrap').style.display = 'none';
       return;
@@ -1353,8 +1782,11 @@
       // The backend log grows past 100 lines on big batches, so slicing
       // a capped response client-side used to freeze the log view.
       const s = await fetch('/api/status?log_offset=' + lastLogLen).then(r => r.json());
+      updateDot(s);
+      updateRunBadges(s);
       appendBatchLog(s.log);
       if (s.total_items) { lastTotal = s.total_items; updateBatchProgress(s.done_items ?? 0, s.total_items, s.batch_started_at); }
+      _updateQueueDoneCounter(s.done_items ?? 0);
       lastLogLen = s.log_total ?? (lastLogLen + s.log.length);
       if (s.error) { batchLog(`⚠ ${s.error}`); break; }
       if (!s.running) break;   // wait for server to confirm fully stopped
@@ -1362,9 +1794,15 @@
     }
 
     const updated = await fetch('/api/items').then(r => r.json());
-    monitorQueue = monitorQueue.map(q => ({...(updated.find(u => u.id === q.id) || q), _done: true}));
+    // Refresh THE RUN'S queue (the user may have switched modes mid-run).
+    const doneQ = (modeQueues[runningMode] || monitorQueue)
+      .map(q => ({...(updated.find(u => u.id === q.id) || q), _done: true}));
+    modeQueues[runningMode] = doneQ;
+    if (monitorMode === runningMode) monitorQueue = doneQ;
     batchRunning = false;
     batchStopped = false;
+    pendingRunControls = null;
+    updateRunLockUI();
     _stopElapsedTick();
     document.getElementById('btn-run-batch').disabled = false;
     document.getElementById('btn-stop-batch-wrap').style.display = 'none';
@@ -1547,7 +1985,21 @@
     if (!sel) return;
     const cur = sel.value;
     sel.innerHTML = '<option value="">— без проекту —</option>' +
+      '<option value="__new__"' + (cur === '__new__' ? ' selected' : '') + '>+ Новий проект…</option>' +
       allProjects.map(p => `<option value="${esc(p.id)}" ${p.id===cur?'selected':''}>${esc(p.name)} (${p.item_count} поз.)</option>`).join('');
+  }
+
+  function onImportProjectChange() {
+    const sel = document.getElementById('import-project-select');
+    const inp = document.getElementById('import-new-project-name');
+    if (!sel || !inp) return;
+    if (sel.value === '__new__') {
+      inp.style.display = '';
+      if (!inp.value) inp.value = (importFilename || '').replace(/\.(xls|xlsx)$/i, '');
+      inp.focus();
+    } else {
+      inp.style.display = 'none';
+    }
   }
 
   function showCreateProject() {
@@ -1825,10 +2277,14 @@
   function _queueProjectItems(projectId) {
     const ids = _projItems.filter(i => i.monitorable).map(i => i.id);
     if (!ids.length) { alert('У проекті немає матеріалів для моніторингу'); return; }
-    ids.forEach(id => selectedItemIds.add(id));
-    updateItemsBatchBar();
-    const logBtn = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Журнал'));
-    showPanel('log', logBtn);
+    // Open the "Проекти" monitor mode with this project preselected — the
+    // queue loads in the imported file's order.
+    monitorProjectId = projectId;
+    modeQueues.project = [];   // force a fresh load for THIS project
+    if (monitorMode === 'project') monitorQueue = modeQueues.project;
+    const monBtn = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Моніторинг'));
+    showPanel('monitor', monBtn);
+    setMonitorMode('project');
   }
 
   async function deleteProject(id) {

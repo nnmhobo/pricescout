@@ -15,6 +15,8 @@ Routing logic:
 Supplier IDs: epicentr, ars, buddvir, kub, venbud, budpostach, m2, vista, megatrade, budia
 """
 
+from matching.monitorable import MONITOR_ALL
+
 # Suppliers that carry GENERAL building materials (dry mixes, insulation, paint, fasteners)
 GENERAL_SUPPLIERS = [
     "epicentr", "ars", "buddvir", "kub", "venbud", "m2", "vista", "megatrade", "budia"
@@ -140,7 +142,13 @@ def get_suppliers_for_item(item: dict, all_supplier_ids: list) -> list:
         # Category was explicitly mapped to empty (industrial/specialised
         # supplies no retailer carries). Marketplaces are the only realistic
         # source for these — try them if enabled, otherwise skip.
-        return marketplace_tail
+        # TEMPORARY (MONITOR_ALL_ITEMS, customer request 2026-07): the
+        # customer wants EVERY item searched, so fall back to the general
+        # retailers instead of skipping. Worst case is a clean "not found"
+        # per supplier, and SKIP_STALE_DAYS suppresses repeats for a month.
+        if not MONITOR_ALL:
+            return marketplace_tail
+        routed = DEFAULT_SUPPLIERS
 
     # Intersect with what's currently enabled, preserving routing order,
     # then append marketplaces so they probe AFTER specialists.

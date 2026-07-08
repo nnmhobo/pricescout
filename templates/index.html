@@ -22,8 +22,7 @@
       </div>
     </div>
     <nav>
-      <button class="nav-btn active" onclick="showPanel('log',this)">Журнал</button>
-      <button class="nav-btn" onclick="showPanel('monitor',this);loadMonitorTab()">Моніторинг</button>
+      <button class="nav-btn active" onclick="showPanel('monitor',this);loadMonitorTab()">Моніторинг</button>
       <button class="nav-btn" onclick="showPanel('results',this)">Результати<span id="cnt-badge"></span></button>
       <button class="nav-btn" onclick="showPanel('items',this);loadItemsTab()">База матеріалів</button>
       <button class="nav-btn" onclick="showPanel('exports',this);loadExports()">Експорти</button>
@@ -68,7 +67,7 @@
     </div>
 
     <!-- Suppliers -->
-    <div class="sb-section">
+    <div class="sb-section" id="suppliers-section">
       <div class="eyebrow" style="display:flex;align-items:center;justify-content:space-between;gap:8px">Постачальники<button id="btn-sup-all" onclick="toggleAllSuppliers()" style="font-size:10px;padding:2px 8px;background:transparent;border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--ink3);font-family:var(--sans);white-space:nowrap">Вимкнути всі</button></div>
       {% for s in suppliers %}
       <div class="sup-row" id="sup-row-{{ s.id }}">
@@ -83,7 +82,7 @@
           <input type="checkbox" id="chk-{{ s.id }}"
                  {% if s.enabled %}checked{% endif %}
                  {% if not s.enabled %}disabled{% endif %}
-                 onchange="renderMonitorTab()">
+                 onchange="onSupplierToggle(this)">
           <div class="t-track"></div><div class="t-thumb"></div>
         </label>
       </div>
@@ -106,31 +105,6 @@
   </aside>
 
   <main>
-
-    <!-- Log -->
-    <div class="panel active" id="panel-log">
-      <div>
-        <div class="panel-title">Журнал виконання</div>
-        <div class="panel-sub" id="log-sub">Готовий до запуску</div>
-        <div id="log-item-banner" style="display:none;align-items:center;gap:10px;margin-top:8px;padding:8px 14px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
-          <span style="font-size:11px;color:var(--ink3);text-transform:uppercase;letter-spacing:0.08em;flex-shrink:0">Пошук:</span>
-          <span id="log-item-label" style="font-size:13px;font-weight:600;color:var(--ink)"></span>
-          <span id="log-item-status" style="margin-left:auto;font-size:11px;color:var(--ink3)"></span>
-        </div>
-      </div>
-      <div class="terminal-chrome">
-        <div class="t-bar">
-          <div class="t-dot"></div><div class="t-dot"></div><div class="t-dot"></div>
-          <span class="t-title">pricescout — scraper.log</span>
-        </div>
-        <div class="t-body" id="t-body">
-          <div class="t-idle">
-            <div class="t-idle-mark">PS</div>
-            <div class="t-idle-txt">ОЧІКУВАННЯ КОМАНДИ</div>
-          </div>
-        </div>
-      </div>
-    </div>
 
     <!-- Results -->
     <div class="panel" id="panel-results">
@@ -171,7 +145,7 @@
     </div>
 
     <!-- Monitor -->
-    <div class="panel" id="panel-monitor">
+    <div class="panel active" id="panel-monitor">
       <div style="display:flex;align-items:center;gap:12px">
         <div class="panel-title">Моніторинг</div>
         <!-- Mode toggle -->
@@ -184,24 +158,50 @@
             style="padding:5px 14px;border:none;border-radius:calc(var(--r-lg) - 2px);font-size:11px;font-weight:500;font-family:var(--sans);cursor:pointer;background:transparent;color:var(--ink3);transition:all 0.15s">
             Черга
           </button>
+          <button id="mode-project" onclick="setMonitorMode('project')"
+            style="padding:5px 14px;border:none;border-radius:calc(var(--r-lg) - 2px);font-size:11px;font-weight:500;font-family:var(--sans);cursor:pointer;background:transparent;color:var(--ink3);transition:all 0.15s">
+            Проекти
+          </button>
         </div>
       </div>
 
-      <!-- Single mode -->
-      <div id="monitor-single">
-        <div id="single-item-banner" style="display:none;align-items:center;gap:10px;padding:10px 16px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);margin-bottom:8px">
+      <!-- Single mode (includes the execution journal — the former Журнал tab) -->
+      <div id="monitor-single" style="display:flex;flex-direction:column;gap:8px;flex:1;min-height:0">
+        <div id="single-item-banner" style="display:none;align-items:center;gap:10px;padding:10px 16px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
           <span style="font-size:11px;color:var(--ink3);text-transform:uppercase;letter-spacing:0.08em;flex-shrink:0">Пошук:</span>
           <span id="single-item-label" style="font-size:13px;font-weight:600;color:var(--ink)"></span>
           <span id="single-item-status" style="margin-left:auto;font-size:11px;color:var(--ink3)"></span>
         </div>
-        <div id="single-idle-hint" style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:20px;text-align:center;color:var(--ink3);font-size:13px">
-          Використовуйте поле "Назва матеріалу" у лівій панелі та натисніть "Запустити моніторинг".<br>
-          <span style="font-size:11px;margin-top:8px;display:block">Результати з'являться у вкладці Результати.</span>
+        <div id="single-idle-hint" style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:12px 20px;text-align:center;color:var(--ink3);font-size:12px">
+          Використовуйте поле "Назва матеріалу" у лівій панелі та натисніть "Запустити моніторинг".
+          Результати з'являться у вкладці Результати.
+        </div>
+        <div class="panel-sub" id="log-sub">Готовий до запуску</div>
+        <div class="terminal-chrome">
+          <div class="t-bar">
+            <div class="t-dot"></div><div class="t-dot"></div><div class="t-dot"></div>
+            <span class="t-title">pricescout — scraper.log</span>
+          </div>
+          <div class="t-body" id="t-body">
+            <div class="t-idle">
+              <div class="t-idle-mark">PS</div>
+              <div class="t-idle-txt">ОЧІКУВАННЯ КОМАНДИ</div>
+            </div>
+          </div>
         </div>
       </div>
 
       <!-- Batch mode -->
       <div id="monitor-batch" style="display:none;flex:1;flex-direction:column;gap:6px;min-height:0">
+        <!-- Project picker (visible only in "Проекти" mode) -->
+        <div id="monitor-project-bar" style="display:none;align-items:center;gap:10px;padding:8px 12px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
+          <span style="font-size:10px;color:var(--ink3);text-transform:uppercase;letter-spacing:0.08em;flex-shrink:0">Проект</span>
+          <select id="monitor-project-select" onchange="onMonitorProjectChange()"
+                  style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans);min-width:240px">
+            <option value="">— оберіть проект —</option>
+          </select>
+          <span id="monitor-project-info" style="font-size:11px;color:var(--ink3)"></span>
+        </div>
         <!-- Single toolbar row: stats + controls -->
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <div style="display:flex;gap:6px;flex-shrink:0">
@@ -240,7 +240,7 @@
             <div style="display:flex;flex-direction:column;gap:2px;padding:5px 10px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);min-width:108px"
                  title="Скільки товарів парсити одночасно. Кожен товар сам по собі опитує постачальників у 3 потоки.">
               <span style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Паралельно</span>
-              <select id="batch-parallel" onchange="renderMonitorTab()"
+              <select id="batch-parallel" onchange="onBatchParallelChange()"
                       style="border:none;background:transparent;font-family:var(--sans);font-size:12px;outline:none;cursor:pointer;padding:0">
                 <option value="1">1 (послідовно)</option>
                 <option value="2">2 одночасно</option>
@@ -253,6 +253,21 @@
             <input class="f-input" type="text" id="monitor-search" placeholder="Пошук…" oninput="renderMonitorTab()" style="width:160px;padding-right:22px">
             <button onclick="document.getElementById('monitor-search').value='';renderMonitorTab()" style="position:absolute;right:5px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--ink3);font-size:14px">×</button>
           </div>
+          <!-- Search-mode options -->
+          <div id="batch-opts" style="display:flex;align-items:center;gap:12px;flex-shrink:0;padding:5px 10px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
+            <label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;white-space:nowrap"
+                   title="Зупинятися після першої знайденої ціни для кожної позиції">
+              <input type="checkbox" id="opt-single-price" onchange="onSearchOptsChange()"> Пошук однієї ціни
+            </label>
+            <label id="opt-best-price-label" style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;white-space:nowrap;opacity:0.4"
+                   title="Опитати всіх постачальників і залишити найменшу ціну (доступно лише в режимі однієї ціни)">
+              <input type="checkbox" id="opt-best-price" onchange="onSearchOptsChange()" disabled> Найменша ціна
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;white-space:nowrap"
+                   title="Позиції без знайденої ціни отримають рядок з ціною 0 та порожнім посиланням — Excel міститиме всі позиції кошторису">
+              <input type="checkbox" id="opt-fill-missing" onchange="onSearchOptsChange()"> Ціна 0, якщо не знайдено
+            </label>
+          </div>
           <div class="stop-tip-wrap" style="position:relative;display:none;flex-shrink:0" id="btn-stop-batch-wrap">
             <button id="btn-stop-batch" onclick="stopBatch()" style="padding:8px 16px;background:#c0392b;color:#fff;border:none;border-radius:var(--r);font-size:12px;font-weight:600;font-family:var(--sans);cursor:pointer;white-space:nowrap;width:100%">◼ Зупинити</button>
             <div class="stop-tip-box">
@@ -264,6 +279,14 @@
             <div class="run-icon"><svg width="7" height="9" viewBox="0 0 7 9" fill="var(--gold)"><path d="M0 0l7 4.5L0 9z"/></svg></div>
             Запустити чергу
           </button>
+        </div>
+
+        <!-- Supplier priority order (single-price mode without best-price) -->
+        <div id="supplier-order-box" style="display:none;flex-direction:column;gap:6px;padding:10px 12px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">
+            Порядок опитування постачальників — перша знайдена ціна зупиняє пошук позиції
+          </div>
+          <div id="supplier-order-list" style="display:flex;flex-wrap:wrap;gap:4px"></div>
         </div>
 
         <!-- Queue + Log side by side when running -->
@@ -457,10 +480,12 @@
           </button>
           <div style="display:flex;flex-direction:column;gap:2px">
             <span style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Прив'язати до проекту</span>
-            <select id="import-project-select" style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans);min-width:160px">
+            <select id="import-project-select" onchange="onImportProjectChange()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans);min-width:160px">
               <option value="">— без проекту —</option>
             </select>
           </div>
+          <input id="import-new-project-name" type="text" placeholder="Назва нового проекту"
+                 style="display:none;font-size:12px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans);min-width:200px;align-self:flex-end">
           <span id="import-result" style="font-size:12px;color:var(--teal)"></span>
         </div>
       </div>

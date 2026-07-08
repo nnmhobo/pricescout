@@ -16,6 +16,7 @@ from core.runner import (
 )
 from core.item_db import load_items, add_item, set_result_override
 from core.suppliers import SUPPLIERS as SUPPLIERS_CONFIG
+from matching.monitorable import MONITOR_ALL
 
 bp = Blueprint("scrape", __name__)
 
@@ -56,7 +57,18 @@ def scrape_batch():
     parallel_items = clamp_parallel(data.get("parallel_items"))
     effective_ids  = apply_limit(item_ids, data.get("limit"))
 
-    start_batch(item_ids, active_ids, parallel_items=parallel_items, limit=data.get("limit"))
+    single_price = bool(data.get("single_price"))
+    start_batch(
+        item_ids, active_ids,
+        parallel_items=parallel_items,
+        limit=data.get("limit"),
+        project_id=(data.get("project_id") or None),
+        run_label=(data.get("label") or None),
+        single_price=single_price,
+        best_price=single_price and bool(data.get("best_price")),
+        supplier_order=(data.get("supplier_order") or None),
+        fill_missing=bool(data.get("fill_missing")),
+    )
     return jsonify({
         "status":          "started",
         "item_count":      len(effective_ids),
@@ -100,6 +112,8 @@ def status():
         "done_items":     sum(1 for s in item_states.values() if s.get("done")),
         "found_items":    sum(1 for s in item_states.values() if s.get("results")),
         "batch_started_at": state.get("batch_started_at"),
+        "project_id":     state.get("project_id"),
+        "run_options":    state.get("run_options"),
         "item_ids":       list(item_states.keys()),
     })
 
@@ -136,6 +150,7 @@ def config():
         "max_parallel_items":     MAX_PARALLEL_ITEMS,
         "default_parallel_items": DEFAULT_PARALLEL_ITEMS,
         "skip_stale_days":        SKIP_STALE_DAYS,
+        "monitor_all_items":      MONITOR_ALL,
     })
 
 

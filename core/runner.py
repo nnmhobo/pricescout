@@ -188,11 +188,51 @@ def _scrape_one_supplier(supplier, label, item, ilog):
     return supplier, result, found_url, saved_entry, saved_url
 
 
-def _run_single_item(item_id: str, active_suppliers: list, discovery_mode: bool = False) -> None:
+def _missing_stub(item_id: str, display_label: str, item: dict) -> dict:
+    """Placeholder row for the 'ціна 0, якщо не знайдено' option
+    (fill_missing): keeps EVERY кошторис position present in Results/Excel
+    with price 0 and an empty URL, so the customer can align exported
+    columns with the original file row-by-row."""
+    return {
+        "name":          "не знайдено",
+        "price":         0,
+        "currency":      "UAH",
+        "unit":          None,
+        "brand":         None,
+        "sku":           None,
+        "specs":         None,
+        "supplier":      "—",
+        "url":           "",
+        "date_scraped":  datetime.now().strftime("%Y-%m-%d"),
+        "item_id":       item_id,
+        "supplier_id":   None,
+        "item_label":    display_label,
+        "qty":           item.get("qty"),
+        "unit_estimate": item.get("unit"),
+        "total_price":   0,
+    }
+
+
+def _run_single_item(item_id: str, active_suppliers: list, discovery_mode: bool = False,
+                     qty_override: float | None = None,
+                     single_price: bool = False, best_price: bool = False,
+                     supplier_order: list | None = None,
+                     fill_missing: bool = False) -> None:
     """Scrape one item across its routed suppliers. Results land in
     item_states[item_id] and in core.state.
 
     discovery_mode=True: skip cache and smart-skip, force all suppliers.
+    qty_override: per-project quantity (project runs) — replaces the shared
+    item qty so totals match the project's кошторис.
+
+    Search-mode options (from the batch toolbar checkboxes):
+      single_price + supplier_order  — probe suppliers SEQUENTIALLY in the
+        user's priority order and stop at the first found price.
+      single_price + best_price     — query all routed suppliers as usual,
+        then keep only the cheapest hit in the results (the DB still records
+        every supplier's price for availability/history).
+      fill_missing                  — items that end with no results get a
+        stub row (price 0, empty URL) so Excel has a row per position.
     """
     # Cooperative stop: once the user hits stop, every item still queued
     # in the pool must become an instant no-op. Without this the batch
@@ -204,6 +244,8 @@ def _run_single_item(item_id: str, active_suppliers: list, discovery_mode: bool 
     item = get_item(item_id)
     if not item:
         return
+    if qty_override is not None:
+        item["qty"] = qty_override
 
     # `search_label` is the query we feed to suppliers (a shortened version
     # of the кошторис row, e.g. "Ceresit CT 225"). `display_label` is what
@@ -264,15 +306,19 @@ def _run_single_item(item_id: str, active_suppliers: list, discovery_mode: bool 
 
     if not item.get("monitorable", True):
         ilog(f"  → Пропущено (не моніториться): {label[:60]}")
+        if fill_missing:
+            istate["results"].append(_missing_stub(item_id, display_label, item))
         if not discovery_mode:
-            _session_cache[cache_key] = []
+            _session_cache[cache_key] = list(istate["results"])
         istate["done"] = True
         return
 
     if not routed_suppliers:
         ilog(f"  → Пропущено (категорія не підтримується постачальниками): {item.get('category', '—')}")
+        if fill_missing:
+            istate["results"].append(_missing_stub(item_id, display_label, item))
         if not discovery_mode:
-            _session_cache[cache_key] = []
+            _session_cache[cache_key] = list(istate["results"])
         istate["done"] = True
         return
 
@@ -291,62 +337,113 @@ def _run_single_item(item_id: str, active_suppliers: list, discovery_mode: bool 
         istate["done"] = True
         return
 
-    with ThreadPoolExecutor(max_workers=inner_workers) as pool:
-        futures = [
-            pool.submit(_scrape_one_supplier, supplier, label, item, ilog)
-            for supplier in routed_suppliers
-        ]
-        for fut in as_completed(futures):
+    def _record(supplier: dict, result: dict, found_url) -> None:
+        """Enrich a scraper hit and persist it (shared by both modes)."""
+        nonlocal found_count
+        found_count += 1
+        result["item_id"] = item_id
+        result["supplier_id"] = supplier["id"]
+        # Display the original кошторис label, not the shortened
+        # `search_label` we sent to the supplier — the user wrote
+        # the long name and expects to see it in the results.
+        result["item_label"] = display_label
+        qty = item.get("qty")
+        unit_est = item.get("unit")
+        price = result.get("price")
+        total = None
+        try:
+            if qty is not None and price is not None:
+                total = round(float(qty) * float(price), 2)
+        except (TypeError, ValueError):
+            total = None
+        result["qty"] = qty
+        result["unit_estimate"] = unit_est
+        result["total_price"] = total
+
+        istate["results"].append(result)
+        update_supplier_entry(
+            item_id, supplier["id"], found_url, True, result.get("price"),
+        )
+        if total is not None:
+            ilog(
+                f"  ✓ {supplier['name']}: {result['name'][:50]} — "
+                f"{price} ₴/{unit_est or 'од'} × {qty} = {total} ₴"
+            )
+        else:
+            ilog(f"  ✓ {supplier['name']}: {result['name'][:50]} — {price} ₴")
+
+    if single_price and not best_price:
+        # ── One price, user-defined priority: probe SEQUENTIALLY and stop
+        # at the first supplier that returns a price.
+        if supplier_order:
+            order_index = {sid: n for n, sid in enumerate(supplier_order)}
+            routed_suppliers = sorted(
+                routed_suppliers,
+                key=lambda s: order_index.get(s["id"], len(order_index)),
+            )
+        ilog("  Режим: одна ціна | порядок: " + " → ".join(s["name"] for s in routed_suppliers))
+        for supplier in routed_suppliers:
             if state.get("stop_requested"):
-                # Cooperative stop — attempt to cancel pending futures and
-                # let any in-flight ones drain on their own.
-                for f in futures:
-                    if not f.done():
-                        f.cancel()
+                ilog("  → зупинено")
                 break
-            try:
-                supplier, result, found_url, saved_entry, saved_url = fut.result()
-            except Exception as exc:
-                ilog(f"  → внутрішня помилка: {exc}")
-                continue
-
+            _sup, result, found_url, saved_entry, _saved = _scrape_one_supplier(
+                supplier, label, item, ilog,
+            )
             if result:
-                found_count += 1
-                result["item_id"] = item_id
-                result["supplier_id"] = supplier["id"]
-                # Display the original кошторис label, not the shortened
-                # `search_label` we sent to the supplier — the user wrote
-                # the long name and expects to see it in the results.
-                result["item_label"] = display_label
-                qty = item.get("qty")
-                unit_est = item.get("unit")
-                price = result.get("price")
-                total = None
+                _record(supplier, result, found_url)
+                break
+            update_supplier_entry(
+                item_id, supplier["id"], saved_entry.get("url"), False, None,
+            )
+            ilog(f"  ✗ {supplier['name']}: не знайдено")
+    else:
+        with ThreadPoolExecutor(max_workers=inner_workers) as pool:
+            futures = [
+                pool.submit(_scrape_one_supplier, supplier, label, item, ilog)
+                for supplier in routed_suppliers
+            ]
+            for fut in as_completed(futures):
+                if state.get("stop_requested"):
+                    # Cooperative stop — attempt to cancel pending futures and
+                    # let any in-flight ones drain on their own.
+                    for f in futures:
+                        if not f.done():
+                            f.cancel()
+                    break
                 try:
-                    if qty is not None and price is not None:
-                        total = round(float(qty) * float(price), 2)
-                except (TypeError, ValueError):
-                    total = None
-                result["qty"] = qty
-                result["unit_estimate"] = unit_est
-                result["total_price"] = total
+                    supplier, result, found_url, saved_entry, saved_url = fut.result()
+                except Exception as exc:
+                    ilog(f"  → внутрішня помилка: {exc}")
+                    continue
 
-                istate["results"].append(result)
-                update_supplier_entry(
-                    item_id, supplier["id"], found_url, True, result.get("price"),
-                )
-                if total is not None:
-                    ilog(
-                        f"  ✓ {supplier['name']}: {result['name'][:50]} — "
-                        f"{price} ₴/{unit_est or 'од'} × {qty} = {total} ₴"
-                    )
+                if result:
+                    _record(supplier, result, found_url)
                 else:
-                    ilog(f"  ✓ {supplier['name']}: {result['name'][:50]} — {price} ₴")
-            else:
-                update_supplier_entry(
-                    item_id, supplier["id"], saved_entry.get("url"), False, None,
-                )
-                ilog(f"  ✗ {supplier['name']}: не знайдено")
+                    update_supplier_entry(
+                        item_id, supplier["id"], saved_entry.get("url"), False, None,
+                    )
+                    ilog(f"  ✗ {supplier['name']}: не знайдено")
+
+        # ── One price, cheapest wins: all suppliers were queried (and the
+        # DB keeps every price), but the Results/Excel row set is trimmed
+        # to the single cheapest hit.
+        if single_price and best_price and len(istate["results"]) > 1:
+            best = min(
+                istate["results"],
+                key=lambda r: (r.get("price") is None, r.get("price") or 0),
+            )
+            ilog(
+                f"  → найменша ціна: {best.get('price')} ₴ ({best.get('supplier')}), "
+                f"інші {len(istate['results']) - 1} відкинуто"
+            )
+            istate["results"] = [best]
+            found_count = 1
+
+    # Stub row for "ціна 0, якщо не знайдено" — only when the item actually
+    # finished all its attempts (not when the run was stopped mid-way).
+    if fill_missing and not istate["results"] and not state.get("stop_requested"):
+        istate["results"].append(_missing_stub(item_id, display_label, item))
+        ilog("  → ціну не знайдено, додано рядок з ціною 0")
 
     ilog(f"Готово. {found_count}/{len(routed_suppliers)} постачальників.")
     # Don't populate the cache in discovery mode: subsequent normal runs
@@ -363,6 +460,12 @@ def _run_batch(
     parallel_items: int | None = None,
     limit: int | None = None,
     discovery_mode: bool = False,
+    project_id: str | None = None,
+    run_label: str | None = None,
+    single_price: bool = False,
+    best_price: bool = False,
+    supplier_order: list | None = None,
+    fill_missing: bool = False,
 ) -> None:
     """Main batch orchestrator. Runs in a background thread.
 
@@ -393,12 +496,35 @@ def _run_batch(
     state["parallel_items"] = workers
     state["limit"] = len(item_ids)
     state["total_items"] = total_requested
+    state["project_id"] = project_id
+    # Expose the run's options so a page reload can restore + lock the
+    # toolbar checkboxes while the run is still active.
+    state["run_options"] = {
+        "single_price":     single_price,
+        "best_price":       best_price,
+        "fill_missing":     fill_missing,
+        "supplier_order":   supplier_order or [],
+        # The run's supplier set — lets a page reload restore the sidebar
+        # toggles exactly as they were when the run started.
+        "active_suppliers": list(active_supplier_ids or []),
+    }
+    base_label = run_label or ("Discovery" if discovery_mode else "Черга")
     if total_requested and len(item_ids) < total_requested:
-        state["label"] = (
-            f"{'Discovery' if discovery_mode else 'Черга'} ({len(item_ids)} з {total_requested} матеріалів)"
-        )
+        state["label"] = f"{base_label} ({len(item_ids)} з {total_requested} матеріалів)"
     else:
-        state["label"] = f"{'Discovery' if discovery_mode else 'Черга'} ({len(item_ids)} матеріалів)"
+        state["label"] = f"{base_label} ({len(item_ids)} матеріалів)"
+
+    # Project runs: per-project quantities (from project_items links) replace
+    # the shared item qty so totals match THIS project's кошторис.
+    qty_overrides: dict[str, float] = {}
+    if project_id:
+        try:
+            from core.item_db import get_project_items
+            for pi in get_project_items(project_id):
+                if pi.get("qty") is not None:
+                    qty_overrides[pi["id"]] = pi["qty"]
+        except Exception as exc:
+            log(f"Не вдалося завантажити кількості проекту: {exc}")
 
     item_states.clear()
     item_states.update({
@@ -416,6 +542,9 @@ def _run_batch(
         + (f" (з {total_requested})" if total_requested != len(item_ids) else "")
         + f" | {len(active_suppliers)} постачальників | паралельно: {workers}"
         + (f" | SKIP_STALE відключено" if discovery_mode else f" | SKIP_STALE: {SKIP_STALE_DAYS}д")
+        + (" | режим: одна ціна (найменша)" if single_price and best_price else "")
+        + (" | режим: одна ціна (за порядком)" if single_price and not best_price else "")
+        + (" | ціна 0 для не знайдених" if fill_missing else "")
     )
 
     try:
@@ -424,7 +553,11 @@ def _run_batch(
             for iid in item_ids:
                 if state.get("stop_requested"):
                     break
-                futures.append(pool.submit(_run_single_item, iid, active_suppliers, discovery_mode))
+                futures.append(pool.submit(
+                    _run_single_item, iid, active_suppliers, discovery_mode,
+                    qty_overrides.get(iid),
+                    single_price, best_price, supplier_order, fill_missing,
+                ))
             for fut in as_completed(futures):
                 try:
                     fut.result()
@@ -447,7 +580,20 @@ def _run_batch(
         for iid in item_ids:
             run_results.extend(item_states.get(iid, {}).get("results", []))
 
-        state["results"] = sort_results(apply_overrides(run_results))
+        if project_id:
+            # Project runs keep the imported file's order: item_ids already
+            # follow project positions, so sort by that sequence (suppliers
+            # alphabetical inside each item). Results tab + Excel then match
+            # the кошторис row order.
+            order = {iid: n for n, iid in enumerate(item_ids)}
+            run_results = apply_overrides(run_results)
+            run_results.sort(key=lambda r: (
+                order.get(r.get("item_id"), len(order)),
+                _ua_sort_key(r.get("supplier")),
+            ))
+            state["results"] = run_results
+        else:
+            state["results"] = sort_results(apply_overrides(run_results))
         state["last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
         stopped_note = " (зупинено)" if state.get("stop_requested") else ""
         log(f"Все готово{stopped_note}. {len(run_results)} цін по {len(item_ids)} матеріалах.")
@@ -476,10 +622,26 @@ def start_batch(
     parallel_items: int | None = None,
     limit: int | None = None,
     discovery_mode: bool = False,
+    project_id: str | None = None,
+    run_label: str | None = None,
+    single_price: bool = False,
+    best_price: bool = False,
+    supplier_order: list | None = None,
+    fill_missing: bool = False,
 ) -> None:
     threading.Thread(
         target=_run_batch,
         args=(item_ids, active_supplier_ids),
-        kwargs={"parallel_items": parallel_items, "limit": limit, "discovery_mode": discovery_mode},
+        kwargs={
+            "parallel_items": parallel_items,
+            "limit": limit,
+            "discovery_mode": discovery_mode,
+            "project_id": project_id,
+            "run_label": run_label,
+            "single_price": single_price,
+            "best_price": best_price,
+            "supplier_order": supplier_order,
+            "fill_missing": fill_missing,
+        },
         daemon=True,
     ).start()
