@@ -28,13 +28,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── TEMPORARY override (customer request, 2026-07): monitor EVERYTHING ──
-# When MONITOR_ALL_ITEMS=1 (set in .env), is_monitorable() always returns
-# True, so imports mark every item monitorable and the runner skips nothing.
-# Existing DB rows are synced once at startup — see the 'monitor_all_mode'
-# block in core/item_db._migrate().
-# To restore the SKIP_KW blocklist: remove the line from .env (or set it
-# to 0) and restart — the next startup recomputes monitorable from labels.
-MONITOR_ALL: bool = os.getenv("MONITOR_ALL_ITEMS", "0") == "1"
+# When MONITOR_ALL_ITEMS=1, is_monitorable() always returns True, so imports
+# mark every item monitorable and the runner skips nothing. Existing DB rows
+# are synced once at startup — see the 'monitor_all_mode' block in
+# core/item_db._migrate().
+# DEFAULT IS ON ("1") so fresh installs from git behave the same without
+# needing a .env file (.env is not committed).
+# To restore the SKIP_KW blocklist: set MONITOR_ALL_ITEMS=0 in .env (or flip
+# this default back to "0") and restart — the next startup recomputes
+# monitorable from labels.
+MONITOR_ALL: bool = os.getenv("MONITOR_ALL_ITEMS", "1") == "1"
 
 # Items that are NOT findable on retail building suppliers.
 # Keep this list SHORT — only things no retail construction site stocks.

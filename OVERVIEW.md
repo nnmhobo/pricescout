@@ -555,7 +555,7 @@ Dark-mode filter-button fix (keep):
 | `MAX_INNER_WORKERS` | `8` | Suppliers per item in parallel |
 | `MAX_INNER_WORKERS_DISCOVERY` | `10` | Inner workers in discovery mode (items run sequentially) |
 | `SKIP_STALE_DAYS` | `30` | Days before a "not found" entry is re-checked |
-| `MONITOR_ALL_ITEMS` | `0` (currently `1` in .env) | ⚠ TEMPORARY customer request 2026-07: `1` bypasses the SKIP_KW blocklist — `is_monitorable()` always True + one-time startup sync sets every existing item `monitorable=1` (settings key `monitor_all_mode` in `_migrate()`). Remove from .env + restart to revert (flags recomputed from labels). |
+| `MONITOR_ALL_ITEMS` | `1` (⚠ default ON in code) | TEMPORARY customer request 2026-07: bypasses the SKIP_KW blocklist — `is_monitorable()` always True + one-time startup sync sets every existing item `monitorable=1` (settings key `monitor_all_mode` in `_migrate()`). Default is ON so fresh installs from git behave the same without a .env. To revert: set `MONITOR_ALL_ITEMS=0` in .env (or flip the code default in matching/monitorable.py) + restart — flags are recomputed from labels. |
 
 ---
 
