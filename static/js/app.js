@@ -1134,10 +1134,16 @@
 
     // Category-aware estimate: categories with HVAC/automation/electrical get fewer suppliers
     // Mirrors category_routing.py logic on the frontend
-    const SKIP_CATS = new Set([
+    const monitorAll = !!serverConfig.monitor_all_items;
+    // HVAC categories route to ТеплоДім (+ marketplaces) — they ARE searched.
+    const HVAC_CATS = new Set([
       'Теплопостачання та опалення','Вентиляція та кондиціонування',
-      'Теплотехнічне устаткування','Автоматизація (КВП)',
-      'Енергоносії','Спеціальні роботи',
+      'Теплотехнічне устаткування'
+    ]);
+    // Explicit-skip categories: no retail supplier carries them. With
+    // MONITOR_ALL_ITEMS the backend falls back to all general suppliers.
+    const SKIP_CATS = new Set([
+      'Автоматизація (КВП)','Енергоносії','Спеціальні роботи',
       'Вантажопідйомне устаткування','Інше устаткування'
     ]);
     const REDUCED_CATS = new Set([
@@ -1156,7 +1162,8 @@
     for (const item of itemsToRun) {
       const cat = item.category || '';
       let sups;
-      if (SKIP_CATS.has(cat))          sups = 0;
+      if (HVAC_CATS.has(cat))          sups = Math.min(supCnt, 3);
+      else if (SKIP_CATS.has(cat))     sups = monitorAll ? supCnt : 0;
       else if (REDUCED_CATS.has(cat))  sups = Math.min(supCnt, 3);
       else if (PLUMBING_CATS.has(cat)) sups = Math.min(supCnt, 6);
       else                              sups = supCnt;
@@ -1173,8 +1180,11 @@
       const best    = prices.length ? Math.min(...prices).toLocaleString('uk-UA') + ' ₴' : '—';
       const checked = Object.values(item.suppliers || {}).map(s => s.last_checked).filter(Boolean).sort().reverse()[0] || '—';
       const done    = item._done;
-      const SKIP_CATS_ROW = new Set(['Теплопостачання та опалення','Вентиляція та кондиціонування','Теплотехнічне устаткування','Автоматизація (КВП)','Енергоносії','Спеціальні роботи','Вантажопідйомне устаткування','Інше устаткування']);
-      const willSearch = item.monitorable !== false && !SKIP_CATS_ROW.has(item.category || '');
+      // HVAC categories are NOT listed — they route to ТеплоДім and are
+      // searched. With MONITOR_ALL_ITEMS on, nothing is category-skipped
+      // (the backend falls back to all general suppliers).
+      const SKIP_CATS_ROW = new Set(['Автоматизація (КВП)','Енергоносії','Спеціальні роботи','Вантажопідйомне устаткування','Інше устаткування']);
+      const willSearch = item.monitorable !== false && (monitorAll || !SKIP_CATS_ROW.has(item.category || ''));
       const inLimit    = willRunIds.has(item.id);
       const monBadge = !inLimit
         ? '<span style="font-size:9px;padding:1px 5px;background:#f0ede8;color:var(--ink3);border-radius:3px" title="Поза межами обраної к-сті">поза лімітом</span>'

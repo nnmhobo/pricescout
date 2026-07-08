@@ -211,7 +211,7 @@ All routes are Flask Blueprints registered in `app.py`. All return JSON unless n
 | POST | `/api/stop` | Sets `state["stop_requested"]=True` if running. Returns immediately. |
 | GET | `/api/status` | Poll run status. Optional `?log_offset=N` → log lines from index N; without it, last 100 lines. |
 | POST | `/api/discover` | Discovery run: all suppliers, ignores SKIP_STALE_DAYS + session cache. Body like batch (no parallel/limit); forces `parallel_items=1`. |
-| GET | `/api/config` | `{max_parallel_items, default_parallel_items, skip_stale_days}` |
+| GET | `/api/config` | `{max_parallel_items, default_parallel_items, skip_stale_days, monitor_all_items}` |
 | GET | `/api/results` | `state["results"]` as JSON array |
 | PATCH | `/api/results/<item_id>/<supplier_id>` | Persist manual price/comment override. Body: `{manual_price?, comment?}` (null/"" clears). Re-applies all overrides to `state["results"]` in memory and re-sorts; returns `{status, result}`. |
 
@@ -441,7 +441,7 @@ find_best_match(query, candidates, ...)  # first of find_top_matches or None
 
 `is_monitorable(label: str) -> bool` — **takes exactly 1 argument.** Permissive: True unless the label matches a `SKIP_KW` keyword (energy carriers, industrial chemicals, sensors/alarm electronics, rags, hoisting, misc non-retail). Keywords starting with `^` are prefix-anchored (e.g. `"^вода"`). Keep `SKIP_KW` short.
 
-⚠ **TEMPORARY override active:** `MONITOR_ALL_ITEMS=1` in .env makes `is_monitorable()` return True unconditionally, and `_migrate()` syncs all DB rows to `monitorable=1` when the mode changes (see §13). The blocklist is bypassed until that .env line is removed. Note: category routing still applies — items in explicit-skip categories (Автоматизація, Енергоносії, …) are only tried on marketplaces (prom/olx) when those are enabled.
+⚠ **TEMPORARY override active:** `MONITOR_ALL_ITEMS=1` (default ON in code) makes `is_monitorable()` return True unconditionally, and `_migrate()` syncs all DB rows to `monitorable=1` when the mode changes (see §13). Also affects routing: explicit-skip categories fall back to `DEFAULT_SUPPLIERS` instead of marketplaces-only (see below), the flag is exposed as `monitor_all_items` in `/api/config`, and the frontend queue badge/estimate honor it (`monitorAll` in `renderMonitorTab()`).
 
 ### `matching/category_routing.py`
 
@@ -449,7 +449,7 @@ find_best_match(query, candidates, ...)  # first of find_top_matches or None
 
 1. **Label override:** if the item label contains any `RETAIL_OVERRIDE_KW` keyword (шпаклівка, штукатурка, ceresit, knauf, …) → route to `GENERAL_SUPPLIERS` regardless of category.
 2. Otherwise `CATEGORY_ROUTING.get(category, DEFAULT_SUPPLIERS)` (DEFAULT = GENERAL_SUPPLIERS).
-3. Explicitly **empty** categories (Автоматизація (КВП), Енергоносії, Спеціальні роботи, Вантажопідйомне устаткування, Інше устаткування) → specialists skipped entirely.
+3. Explicitly **empty** categories (Автоматизація (КВП), Енергоносії, Спеціальні роботи, Вантажопідйомне устаткування, Інше устаткування) → specialists skipped entirely. ⚠ TEMPORARY: with `MONITOR_ALL_ITEMS=1` these fall back to `DEFAULT_SUPPLIERS` so every item gets searched.
 4. Marketplace tail: `prom`/`olx` (if enabled) are **always appended after** the specialist list — including for empty categories, where they are the only suppliers tried.
 5. Everything is intersected with the enabled supplier set, preserving order.
 

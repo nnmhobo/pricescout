@@ -16,6 +16,7 @@ from core.runner import (
 )
 from core.item_db import load_items, add_item, set_result_override
 from core.suppliers import SUPPLIERS as SUPPLIERS_CONFIG
+from matching.monitorable import MONITOR_ALL
 
 bp = Blueprint("scrape", __name__)
 
@@ -136,6 +137,7 @@ def config():
         "max_parallel_items":     MAX_PARALLEL_ITEMS,
         "default_parallel_items": DEFAULT_PARALLEL_ITEMS,
         "skip_stale_days":        SKIP_STALE_DAYS,
+        "monitor_all_items":      MONITOR_ALL,
     })
 
 
