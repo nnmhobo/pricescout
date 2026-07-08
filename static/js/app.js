@@ -175,6 +175,7 @@
   // the enabled set feeds the routing AND the supplier-order box.
   function onSupplierToggle(cb) {
     if (batchRunning || singleRunning) { cb.checked = !cb.checked; return; }
+    saveSupplierSelection();
     renderMonitorTab();
   }
 
@@ -185,12 +186,36 @@
     checkboxes.forEach(c => { c.checked = !anyOn; });
     const btn = document.getElementById('btn-sup-all');
     if (btn) btn.textContent = anyOn ? 'Увімкнути всі' : 'Вимкнути всі';
+    saveSupplierSelection();
     if (document.getElementById('queue-count')) renderMonitorTab();
+  }
+
+  // ── Supplier selection persistence ────────────────────────────
+  // The sidebar is rendered all-checked by the template on every page load;
+  // persist the user's actual selection so a reload doesn't reset it (and
+  // with it, the supplier-order box).
+  function saveSupplierSelection() {
+    try { localStorage.setItem('activeSuppliers', JSON.stringify(getEnabledIds())); } catch (e) {}
+  }
+
+  function _applySupplierSelection(ids) {
+    if (!Array.isArray(ids)) return;
+    document.querySelectorAll('[id^="chk-"]').forEach(c => {
+      if (c.id === 'chk-all' || c.disabled) return;
+      c.checked = ids.includes(c.id.replace('chk-', ''));
+    });
+  }
+
+  function restoreSupplierSelection() {
+    let ids = null;
+    try { ids = JSON.parse(localStorage.getItem('activeSuppliers') || 'null'); } catch (e) {}
+    if (Array.isArray(ids)) _applySupplierSelection(ids);
   }
 
   initTheme();
   loadItems();
-  restoreSearchOpts();   // search-mode checkboxes persist across reloads
+  restoreSearchOpts();        // search-mode checkboxes persist across reloads
+  restoreSupplierSelection(); // sidebar supplier toggles persist across reloads
 
   // Fetch the server's parallelism caps and rebuild the "Паралельно" select
   // so the user can pick up to MAX_PARALLEL_ITEMS items at once.
@@ -207,6 +232,9 @@
       if (n === def) opt.selected = true;
       sel.appendChild(opt);
     }
+    // The rebuild above resets the selection to the default — re-apply the
+    // saved preference (or the active run's values, whichever is pending).
+    applyBatchControls();
   }).catch(() => {});
 
   // ── Resume active run on page reload ─────────────────────────
@@ -240,8 +268,16 @@
           const se = document.getElementById('opt-single-price');  if (se) se.checked = !!o.single_price;
           const be = document.getElementById('opt-best-price');    if (be) be.checked = !!o.best_price;
           const fe = document.getElementById('opt-fill-missing');  if (fe) fe.checked = !!o.fill_missing;
+          // The run's supplier set wins over localStorage — the sidebar must
+          // show exactly what this run is using (and stays locked).
+          if (Array.isArray(o.active_suppliers) && o.active_suppliers.length) {
+            _applySupplierSelection(o.active_suppliers);
+          }
           onSearchOptsChange();
         }
+        // Show the run's parallel/limit values in the (locked) controls.
+        pendingRunControls = { parallel: d.parallel_items, limit: d.limit, total: d.total_items };
+        applyBatchControls();
         updateRunLockUI();
         document.getElementById('batch-log-wrap').style.display = 'flex';
         document.getElementById('btn-run-batch').disabled = true;
@@ -278,6 +314,7 @@
           }
           batchRunning = false;
           batchStopped = false;
+          pendingRunControls = null;
           updateRunLockUI();
           _stopElapsedTick();
           document.getElementById('btn-run-batch').disabled = false;
@@ -300,6 +337,10 @@
       } else {
         // ── Reconnect to a running single-item scrape ─────────────────
         singleRunning = true;
+        if (d.run_options && Array.isArray(d.run_options.active_suppliers)
+            && d.run_options.active_suppliers.length) {
+          _applySupplierSelection(d.run_options.active_suppliers);
+        }
         updateRunLockUI();
         document.getElementById('run-btn').disabled = true;
         document.getElementById('stop-btn').style.display = '';
@@ -1252,11 +1293,67 @@
     const mode = document.getElementById('batch-count-mode').value;
     const custom = document.getElementById('batch-count-custom');
     custom.style.display = mode === 'custom' ? '' : 'none';
+    saveBatchControls();
     renderMonitorTab();
   }
 
   function onBatchCountCustomInput() {
     // Re-render on every keystroke so the time estimate tracks the live value.
+    saveBatchControls();
+    renderMonitorTab();
+  }
+
+  function onBatchParallelChange() {
+    saveBatchControls();
+    renderMonitorTab();
+  }
+
+  // ── Batch controls persistence (Паралельно + К-сть товарів) ──
+  // Saved ONLY from the explicit change handlers above — never from
+  // render passes, which would overwrite the stored value with the
+  // template default before restoration happens.
+  function saveBatchControls() {
+    try {
+      const sel = document.getElementById('batch-parallel');
+      if (sel) localStorage.setItem('batchParallel', sel.value);
+      const modeSel = document.getElementById('batch-count-mode');
+      const custom  = document.getElementById('batch-count-custom');
+      if (modeSel) localStorage.setItem('batchLimit', JSON.stringify({
+        mode: modeSel.value, custom: custom ? custom.value : '',
+      }));
+    } catch (e) {}
+  }
+
+  // Values reported by /api/status for an ACTIVE run — they win over the
+  // saved preferences until the run ends.
+  let pendingRunControls = null;
+
+  function applyBatchControls() {
+    const sel     = document.getElementById('batch-parallel');
+    const modeSel = document.getElementById('batch-count-mode');
+    const custom  = document.getElementById('batch-count-custom');
+    if (pendingRunControls) {
+      const p = String(pendingRunControls.parallel || '');
+      if (sel && p && [...sel.options].some(o => o.value === p)) sel.value = p;
+      if (modeSel && pendingRunControls.limit && pendingRunControls.total
+          && pendingRunControls.limit < pendingRunControls.total) {
+        modeSel.value = 'custom';
+        if (custom) { custom.value = pendingRunControls.limit; custom.style.display = ''; }
+      }
+    } else {
+      try {
+        const p = localStorage.getItem('batchParallel');
+        if (p && sel && [...sel.options].some(o => o.value === p)) sel.value = p;
+        const lm = JSON.parse(localStorage.getItem('batchLimit') || 'null');
+        if (lm && modeSel) {
+          if ([...modeSel.options].some(o => o.value === lm.mode)) modeSel.value = lm.mode;
+          if (custom) {
+            if (lm.custom) custom.value = lm.custom;
+            custom.style.display = modeSel.value === 'custom' ? '' : 'none';
+          }
+        }
+      } catch (e) {}
+    }
     renderMonitorTab();
   }
 
@@ -1363,6 +1460,10 @@
     if (fill)   fill.disabled = lock;
     const projSel = document.getElementById('monitor-project-select');
     if (projSel) projSel.disabled = lock;
+    ['batch-parallel', 'batch-count-mode', 'batch-count-custom'].forEach(cid => {
+      const c = document.getElementById(cid);
+      if (c) c.disabled = lock;
+    });
     const sideBtn = document.getElementById('run-btn');
     if (sideBtn) sideBtn.disabled = lock;
     // Sidebar supplier toggles: NOT via `disabled` (that flag marks
@@ -1686,6 +1787,7 @@
     if (monitorMode === runningMode) monitorQueue = doneQ;
     batchRunning = false;
     batchStopped = false;
+    pendingRunControls = null;
     updateRunLockUI();
     _stopElapsedTick();
     document.getElementById('btn-run-batch').disabled = false;

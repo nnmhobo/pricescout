@@ -240,7 +240,7 @@
             <div style="display:flex;flex-direction:column;gap:2px;padding:5px 10px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);min-width:108px"
                  title="Скільки товарів парсити одночасно. Кожен товар сам по собі опитує постачальників у 3 потоки.">
               <span style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Паралельно</span>
-              <select id="batch-parallel" onchange="renderMonitorTab()"
+              <select id="batch-parallel" onchange="onBatchParallelChange()"
                       style="border:none;background:transparent;font-family:var(--sans);font-size:12px;outline:none;cursor:pointer;padding:0">
                 <option value="1">1 (послідовно)</option>
                 <option value="2">2 одночасно</option>

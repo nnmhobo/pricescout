@@ -500,10 +500,13 @@ def _run_batch(
     # Expose the run's options so a page reload can restore + lock the
     # toolbar checkboxes while the run is still active.
     state["run_options"] = {
-        "single_price":   single_price,
-        "best_price":     best_price,
-        "fill_missing":   fill_missing,
-        "supplier_order": supplier_order or [],
+        "single_price":     single_price,
+        "best_price":       best_price,
+        "fill_missing":     fill_missing,
+        "supplier_order":   supplier_order or [],
+        # The run's supplier set — lets a page reload restore the sidebar
+        # toggles exactly as they were when the run started.
+        "active_suppliers": list(active_supplier_ids or []),
     }
     base_label = run_label or ("Discovery" if discovery_mode else "Черга")
     if total_requested and len(item_ids) < total_requested:
