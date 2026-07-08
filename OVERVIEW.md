@@ -24,6 +24,8 @@ All scraping is done with **Scrapling** (HTTP fetcher + optional Chromium via Sc
 pricescout/
 │
 ├── app.py                  # Flask app + index route (no factory function; module-level `app`)
+├── README.md               # User-facing readme, English (renamed from README_EN.md)
+├── README_UA.md            # User-facing readme, Ukrainian
 ├── START.bat               # Windows launcher (venv + deps + `scrapling install`)
 ├── requirements.txt        # flask, scrapling[fetchers], lxml, xlrd, pandas, openpyxl, python-dotenv, rapidfuzz, requests
 ├── .env                    # (not committed) env overrides
@@ -235,6 +237,7 @@ All routes are Flask Blueprints registered in `app.py`. All return JSON unless n
   "found_items": int,        // items with ≥1 result
   "batch_started_at": "ISO string",
   "project_id": "id or null", // set for project runs (frontend restores Проекти mode)
+  "run_options": {"single_price", "best_price", "fill_missing", "supplier_order"}, // restored+locked by UI on reload
   "item_ids": ["...", ...]   // keys of item_states (frontend queue restore, preserves order)
 }
 ```
@@ -514,7 +517,8 @@ SUPPLIERS = build_suppliers()   # module-level, built at import
 | `showPanel(name, btn)` | Switch panel + nav highlight |
 | `setMonitorMode(mode)` | `'single'`/`'batch'`/`'project'` sub-tabs. Single mode hosts the execution journal (`#t-body` terminal + `#log-sub` — there is NO separate Журнал nav tab; it was merged into Monitoring). Batch/project call `renderMonitorTab()`; project mode shows `#monitor-project-bar`. Monitoring is the default active panel on load. |
 | `onMonitorProjectChange()` | Loads `/api/projects/<id>/items` (file order) into `monitorQueue`; `monitorProjectId` global tags the run. `runBatch()` then sends `project_id` + `label: "Проект: <name>"`. |
-| `onSearchOptsChange()` / `renderSupplierOrderBox()` / `moveSupplierOrder()` | Batch toolbar checkboxes: `#opt-single-price` gates `#opt-best-price` (disabled+unchecked otherwise); single-without-best shows `#supplier-order-box` — active suppliers reorderable with ◀▶, order persisted in `localStorage['supplierOrder']`, sent as `supplier_order`. `#opt-fill-missing` → `fill_missing`. |
+| `onSearchOptsChange()` / `renderSupplierOrderBox()` / `moveSupplierOrder()` | Batch toolbar checkboxes: `#opt-single-price` gates `#opt-best-price` (disabled+unchecked otherwise); single-without-best shows `#supplier-order-box` — active suppliers reorderable with ◀▶, order persisted in `localStorage['supplierOrder']`, sent as `supplier_order`. `#opt-fill-missing` → `fill_missing`. Checkbox states persist in `localStorage['searchOpts']`. |
+| `updateRunLockUI()` / `runningMode` / `singleRunning` / `modeQueues` | ONE monitoring at a time across all three modes (single/batch/project): while a run is active, all Run buttons, option checkboxes, project selector and supplier order are disabled; guards in `runBatch()`/`startScrape()`. Черга and Проекти have SEPARATE queues (`modeQueues`, swapped in `setMonitorMode`); the run's log/progress/stop are shown only in `runningMode`'s view. On reload the run's options come back from `/api/status.run_options` and stay locked until the run ends. |
 | `onImportProjectChange()` | Import tab: "+ Новий проект…" option in `#import-project-select` reveals `#import-new-project-name` (prefilled from `importFilename`); `doImport()` sends `new_project_name`. |
 | `renderMonitorTab()` | Rebuild queue list, estimated time |
 | `runBatch()` | POST `/api/scrape/batch` → poll loop (1500 ms, `?log_offset=`) |
