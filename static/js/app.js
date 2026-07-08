@@ -309,6 +309,7 @@
             updateRunBadges(s);
             if (s.log && s.log.length) appendBatchLog(s.log);
             if (s.total_items) updateBatchProgress(s.done_items ?? 0, s.total_items, s.batch_started_at);
+            _updateQueueDoneCounter(s.done_items ?? 0);
             lastLogLen = s.log_total ?? (lastLogLen + (s.log || []).length);
             if (!s.running) break;   // wait for server to confirm fully stopped
           }
@@ -445,6 +446,18 @@
     if (d.label) {
       const bl = document.getElementById('badge-label');
       bl.textContent = d.label; bl.style.display = '';
+    }
+  }
+
+  // Live "Перевірено" counter — called on every batch poll tick so the
+  // toolbar count moves during the run, not only after a reload.
+  // Cheap direct write; a full renderMonitorTab() per tick would rebuild
+  // the whole queue table (hundreds of rows) every 1.5 s.
+  function _updateQueueDoneCounter(done) {
+    monitorDone = done;
+    if (monitorMode === runningMode) {
+      const c = document.getElementById('queue-done');
+      if (c) c.textContent = done;
     }
   }
 
@@ -1773,6 +1786,7 @@
       updateRunBadges(s);
       appendBatchLog(s.log);
       if (s.total_items) { lastTotal = s.total_items; updateBatchProgress(s.done_items ?? 0, s.total_items, s.batch_started_at); }
+      _updateQueueDoneCounter(s.done_items ?? 0);
       lastLogLen = s.log_total ?? (lastLogLen + s.log.length);
       if (s.error) { batchLog(`⚠ ${s.error}`); break; }
       if (!s.running) break;   // wait for server to confirm fully stopped
