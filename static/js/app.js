@@ -171,7 +171,15 @@
       .map(c => c.id.replace('chk-', ''));
   }
 
+  // Sidebar supplier toggle — locked while any monitoring is active, because
+  // the enabled set feeds the routing AND the supplier-order box.
+  function onSupplierToggle(cb) {
+    if (batchRunning || singleRunning) { cb.checked = !cb.checked; return; }
+    renderMonitorTab();
+  }
+
   function toggleAllSuppliers() {
+    if (batchRunning || singleRunning) return;   // locked during a run
     const checkboxes = [...document.querySelectorAll('[id^="chk-"]:not(:disabled)')];
     const anyOn = checkboxes.some(c => c.checked);
     checkboxes.forEach(c => { c.checked = !anyOn; });
@@ -1292,16 +1300,16 @@
       <div style="display:flex;align-items:center;gap:5px;padding:3px 6px;background:var(--paper);border:1px solid var(--border);border-radius:var(--r)">
         <span style="font-family:var(--mono);font-size:10px;color:var(--ink3)">${i + 1}.</span>
         <span style="font-size:11px">${esc(SUPPLIER_NAMES[id] || id)}</span>
-        <button onclick="moveSupplierOrder('${id}',-1)" ${(batchRunning || i === 0) ? 'disabled' : ''}
+        <button onclick="moveSupplierOrder('${id}',-1)" ${(batchRunning || singleRunning || i === 0) ? 'disabled' : ''}
                 style="background:none;border:none;cursor:pointer;color:var(--ink3);font-size:11px;padding:0 2px" title="Раніше">◀</button>
-        <button onclick="moveSupplierOrder('${id}',1)" ${(batchRunning || i === ordered.length - 1) ? 'disabled' : ''}
+        <button onclick="moveSupplierOrder('${id}',1)" ${(batchRunning || singleRunning || i === ordered.length - 1) ? 'disabled' : ''}
                 style="background:none;border:none;cursor:pointer;color:var(--ink3);font-size:11px;padding:0 2px" title="Пізніше">▶</button>
       </div>`).join('') ||
       '<span style="font-size:11px;color:var(--ink3)">Немає активних постачальників — увімкніть їх у лівій панелі</span>';
   }
 
   function moveSupplierOrder(id, dir) {
-    if (batchRunning) return;   // order is locked during a run
+    if (batchRunning || singleRunning) return;   // order is locked during a run
     const ordered = getOrderedActiveSuppliers();
     const i = ordered.indexOf(id);
     const j = i + dir;
@@ -1346,7 +1354,7 @@
   // the option checkboxes, the project selector, the supplier order and
   // the run buttons of ALL modes (one monitoring at a time).
   function updateRunLockUI() {
-    const lock = batchRunning;
+    const lock = batchRunning || singleRunning;
     const single = document.getElementById('opt-single-price');
     const best   = document.getElementById('opt-best-price');
     const fill   = document.getElementById('opt-fill-missing');
@@ -1356,7 +1364,15 @@
     const projSel = document.getElementById('monitor-project-select');
     if (projSel) projSel.disabled = lock;
     const sideBtn = document.getElementById('run-btn');
-    if (sideBtn) sideBtn.disabled = lock || singleRunning;
+    if (sideBtn) sideBtn.disabled = lock;
+    // Sidebar supplier toggles: NOT via `disabled` (that flag marks
+    // not-implemented suppliers and getEnabledIds() filters on it) —
+    // pointer-events + the onSupplierToggle() guard do the locking.
+    const supSection = document.getElementById('suppliers-section');
+    if (supSection) {
+      supSection.style.pointerEvents = lock ? 'none' : '';
+      supSection.style.opacity = lock ? '0.55' : '';
+    }
     renderSupplierOrderBox();
   }
 

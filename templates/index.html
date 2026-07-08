@@ -67,7 +67,7 @@
     </div>
 
     <!-- Suppliers -->
-    <div class="sb-section">
+    <div class="sb-section" id="suppliers-section">
       <div class="eyebrow" style="display:flex;align-items:center;justify-content:space-between;gap:8px">Постачальники<button id="btn-sup-all" onclick="toggleAllSuppliers()" style="font-size:10px;padding:2px 8px;background:transparent;border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--ink3);font-family:var(--sans);white-space:nowrap">Вимкнути всі</button></div>
       {% for s in suppliers %}
       <div class="sup-row" id="sup-row-{{ s.id }}">
@@ -82,7 +82,7 @@
           <input type="checkbox" id="chk-{{ s.id }}"
                  {% if s.enabled %}checked{% endif %}
                  {% if not s.enabled %}disabled{% endif %}
-                 onchange="renderMonitorTab()">
+                 onchange="onSupplierToggle(this)">
           <div class="t-track"></div><div class="t-thumb"></div>
         </label>
       </div>
