@@ -512,7 +512,7 @@ SUPPLIERS = build_suppliers()   # module-level, built at import
 | Function | Description |
 |---|---|
 | `showPanel(name, btn)` | Switch panel + nav highlight |
-| `setMonitorMode(mode)` | `'single'`/`'batch'`/`'project'` sub-tabs; calls `renderMonitorTab()`. Project mode shows `#monitor-project-bar` and shares the batch panel. |
+| `setMonitorMode(mode)` | `'single'`/`'batch'`/`'project'` sub-tabs. Single mode hosts the execution journal (`#t-body` terminal + `#log-sub` — there is NO separate Журнал nav tab; it was merged into Monitoring). Batch/project call `renderMonitorTab()`; project mode shows `#monitor-project-bar`. Monitoring is the default active panel on load. |
 | `onMonitorProjectChange()` | Loads `/api/projects/<id>/items` (file order) into `monitorQueue`; `monitorProjectId` global tags the run. `runBatch()` then sends `project_id` + `label: "Проект: <name>"`. |
 | `onImportProjectChange()` | Import tab: "+ Новий проект…" option in `#import-project-select` reveals `#import-new-project-name` (prefilled from `importFilename`); `doImport()` sends `new_project_name`. |
 | `renderMonitorTab()` | Rebuild queue list, estimated time |

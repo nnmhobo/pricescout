@@ -22,8 +22,7 @@
       </div>
     </div>
     <nav>
-      <button class="nav-btn active" onclick="showPanel('log',this)">Журнал</button>
-      <button class="nav-btn" onclick="showPanel('monitor',this);loadMonitorTab()">Моніторинг</button>
+      <button class="nav-btn active" onclick="showPanel('monitor',this);loadMonitorTab()">Моніторинг</button>
       <button class="nav-btn" onclick="showPanel('results',this)">Результати<span id="cnt-badge"></span></button>
       <button class="nav-btn" onclick="showPanel('items',this);loadItemsTab()">База матеріалів</button>
       <button class="nav-btn" onclick="showPanel('exports',this);loadExports()">Експорти</button>
@@ -107,31 +106,6 @@
 
   <main>
 
-    <!-- Log -->
-    <div class="panel active" id="panel-log">
-      <div>
-        <div class="panel-title">Журнал виконання</div>
-        <div class="panel-sub" id="log-sub">Готовий до запуску</div>
-        <div id="log-item-banner" style="display:none;align-items:center;gap:10px;margin-top:8px;padding:8px 14px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
-          <span style="font-size:11px;color:var(--ink3);text-transform:uppercase;letter-spacing:0.08em;flex-shrink:0">Пошук:</span>
-          <span id="log-item-label" style="font-size:13px;font-weight:600;color:var(--ink)"></span>
-          <span id="log-item-status" style="margin-left:auto;font-size:11px;color:var(--ink3)"></span>
-        </div>
-      </div>
-      <div class="terminal-chrome">
-        <div class="t-bar">
-          <div class="t-dot"></div><div class="t-dot"></div><div class="t-dot"></div>
-          <span class="t-title">pricescout — scraper.log</span>
-        </div>
-        <div class="t-body" id="t-body">
-          <div class="t-idle">
-            <div class="t-idle-mark">PS</div>
-            <div class="t-idle-txt">ОЧІКУВАННЯ КОМАНДИ</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- Results -->
     <div class="panel" id="panel-results">
       <div class="r-header">
@@ -171,7 +145,7 @@
     </div>
 
     <!-- Monitor -->
-    <div class="panel" id="panel-monitor">
+    <div class="panel active" id="panel-monitor">
       <div style="display:flex;align-items:center;gap:12px">
         <div class="panel-title">Моніторинг</div>
         <!-- Mode toggle -->
@@ -191,16 +165,29 @@
         </div>
       </div>
 
-      <!-- Single mode -->
-      <div id="monitor-single">
-        <div id="single-item-banner" style="display:none;align-items:center;gap:10px;padding:10px 16px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);margin-bottom:8px">
+      <!-- Single mode (includes the execution journal — the former Журнал tab) -->
+      <div id="monitor-single" style="display:flex;flex-direction:column;gap:8px;flex:1;min-height:0">
+        <div id="single-item-banner" style="display:none;align-items:center;gap:10px;padding:10px 16px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
           <span style="font-size:11px;color:var(--ink3);text-transform:uppercase;letter-spacing:0.08em;flex-shrink:0">Пошук:</span>
           <span id="single-item-label" style="font-size:13px;font-weight:600;color:var(--ink)"></span>
           <span id="single-item-status" style="margin-left:auto;font-size:11px;color:var(--ink3)"></span>
         </div>
-        <div id="single-idle-hint" style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:20px;text-align:center;color:var(--ink3);font-size:13px">
-          Використовуйте поле "Назва матеріалу" у лівій панелі та натисніть "Запустити моніторинг".<br>
-          <span style="font-size:11px;margin-top:8px;display:block">Результати з'являться у вкладці Результати.</span>
+        <div id="single-idle-hint" style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:12px 20px;text-align:center;color:var(--ink3);font-size:12px">
+          Використовуйте поле "Назва матеріалу" у лівій панелі та натисніть "Запустити моніторинг".
+          Результати з'являться у вкладці Результати.
+        </div>
+        <div class="panel-sub" id="log-sub">Готовий до запуску</div>
+        <div class="terminal-chrome">
+          <div class="t-bar">
+            <div class="t-dot"></div><div class="t-dot"></div><div class="t-dot"></div>
+            <span class="t-title">pricescout — scraper.log</span>
+          </div>
+          <div class="t-body" id="t-body">
+            <div class="t-idle">
+              <div class="t-idle-mark">PS</div>
+              <div class="t-idle-txt">ОЧІКУВАННЯ КОМАНДИ</div>
+            </div>
+          </div>
         </div>
       </div>
 

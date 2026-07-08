@@ -262,7 +262,9 @@
         // ── Reconnect to a running single-item scrape ─────────────────
         document.getElementById('run-btn').disabled = true;
         document.getElementById('stop-btn').style.display = '';
-        showPanel('log', document.querySelector('.nav-btn'));
+        const monBtn2 = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Моніторинг'));
+        showPanel('monitor', monBtn2);
+        setMonitorMode('single');
         poll();
       }
     }
@@ -315,12 +317,6 @@
     // Clear log window
     document.getElementById('t-body').innerHTML = '';
 
-    // Show item banner in Журнал panel
-    const logBanner = document.getElementById('log-item-banner');
-    const logLabel  = document.getElementById('log-item-label');
-    const logStatus = document.getElementById('log-item-status');
-    if (logBanner) { logLabel.textContent = label; logStatus.textContent = 'Виконується…'; logBanner.style.display = 'flex'; }
-
     // Show item banner in Моніторинг > Один матеріал panel
     const monBanner  = document.getElementById('single-item-banner');
     const monLabel   = document.getElementById('single-item-label');
@@ -341,7 +337,9 @@
       document.getElementById('stop-btn').disabled = false;
       document.getElementById('stop-btn').textContent = '◼ Зупинити';
       setExcelBtn(false);
-      showPanel('log', document.querySelector('.nav-btn'));
+      const monBtn = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Моніторинг'));
+      showPanel('monitor', monBtn);
+      setMonitorMode('single');
       poll();
     });
   }
@@ -385,11 +383,9 @@
       } else {
         document.getElementById('run-btn').disabled = false;
         document.getElementById('stop-btn').style.display = 'none';
-        // Update banners with result count
+        // Update banner with result count
         const statusText = d.count > 0 ? d.count + ' результатів' : 'Не знайдено';
-        const logStatus = document.getElementById('log-item-status');
         const monStatus = document.getElementById('single-item-status');
-        if (logStatus) logStatus.textContent = statusText;
         if (monStatus) monStatus.textContent = statusText;
         // Always load results (covers manual stop with partial results)
         if (d.count > 0) {
@@ -1046,10 +1042,9 @@
     if (item) {
       document.getElementById('cat-input').value = label;
       activeItemId = id;
-      const chip = document.getElementById('log-item-label');
-      if (chip) { chip.textContent = label; chip.style.display = ''; }
-      const logBtn = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Журнал'));
-      showPanel('log', logBtn);
+      const monBtn = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Моніторинг'));
+      showPanel('monitor', monBtn);
+      setMonitorMode('single');
     }
   }
 
@@ -1093,27 +1088,36 @@
   // ── Monitoring ───────────────────────────────────────────────
 
   function setMonitorMode(mode) {
-    if (mode === 'single') {
-      const logBtn = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Журнал'));
-      showPanel('log', logBtn);
-      return;
-    }
-    // 'batch' (ad-hoc queue) and 'project' (queue = one project's items in
-    // imported-file order) share the same batch panel; project mode just
-    // adds a project selector bar and tags the run with project_id.
-    monitorMode = mode === 'project' ? 'project' : 'batch';
-    document.getElementById('monitor-single').style.display = 'none';
-    document.getElementById('monitor-batch').style.display = 'flex';
     const paint = (id, active) => {
       const b = document.getElementById(id);
       if (!b) return;
       b.style.background = active ? 'var(--gold)' : 'transparent';
       b.style.color = active ? '#fff' : 'var(--ink3)';
     };
+    const projBar = document.getElementById('monitor-project-bar');
+
+    if (mode === 'single') {
+      // Single mode hosts the execution journal (the former Журнал nav tab
+      // was removed) — swap sub-panels, no navigation.
+      monitorMode = 'single';
+      document.getElementById('monitor-single').style.display = 'flex';
+      document.getElementById('monitor-batch').style.display = 'none';
+      paint('mode-single', true);
+      paint('mode-batch', false);
+      paint('mode-project', false);
+      if (projBar) projBar.style.display = 'none';
+      return;
+    }
+
+    // 'batch' (ad-hoc queue) and 'project' (queue = one project's items in
+    // imported-file order) share the same batch panel; project mode just
+    // adds a project selector bar and tags the run with project_id.
+    monitorMode = mode === 'project' ? 'project' : 'batch';
+    document.getElementById('monitor-single').style.display = 'none';
+    document.getElementById('monitor-batch').style.display = 'flex';
     paint('mode-single', false);
     paint('mode-batch', monitorMode === 'batch');
     paint('mode-project', monitorMode === 'project');
-    const projBar = document.getElementById('monitor-project-bar');
     if (projBar) projBar.style.display = monitorMode === 'project' ? 'flex' : 'none';
     if (monitorMode === 'project') populateMonitorProjectSelect();
     renderMonitorTab();
@@ -1948,10 +1952,13 @@
   function _queueProjectItems(projectId) {
     const ids = _projItems.filter(i => i.monitorable).map(i => i.id);
     if (!ids.length) { alert('У проекті немає матеріалів для моніторингу'); return; }
-    ids.forEach(id => selectedItemIds.add(id));
-    updateItemsBatchBar();
-    const logBtn = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Журнал'));
-    showPanel('log', logBtn);
+    // Open the "Проекти" monitor mode with this project preselected — the
+    // queue loads in the imported file's order.
+    monitorProjectId = projectId;
+    monitorQueue = [];
+    const monBtn = [...document.querySelectorAll('.nav-btn')].find(b => b.textContent.includes('Моніторинг'));
+    showPanel('monitor', monBtn);
+    setMonitorMode('project');
   }
 
   async function deleteProject(id) {
