@@ -212,7 +212,7 @@ All routes are Flask Blueprints registered in `app.py`. All return JSON unless n
 | Method | Path | Description |
 |---|---|---|
 | POST | `/api/scrape` | Single-item scrape. Body: `{item_id?, label?, suppliers:[{id, enabled}]}`. If `item_id` missing, looks the item up by `label` and **creates it** if not found. Internally runs a batch of one (`parallel_items=1`). |
-| POST | `/api/scrape/batch` | Start batch. Body: `{item_ids:[], suppliers:[{id, enabled}], parallel_items?, limit?, project_id?, label?}`. With `project_id`: per-project quantities override item qty for totals, and results keep `item_ids` order (file order) instead of alphabetical. `label` overrides the run label (e.g. `"Проект: Школа"`). |
+| POST | `/api/scrape/batch` | Start batch. Body: `{item_ids:[], suppliers:[{id, enabled}], parallel_items?, limit?, project_id?, label?, single_price?, best_price?, supplier_order?:[ids], fill_missing?}`. `project_id`: per-project qty for totals + results in `item_ids` (file) order. `single_price` alone: suppliers probed SEQUENTIALLY per item in `supplier_order` priority, first price wins. `single_price+best_price`: all suppliers queried, only the cheapest kept in results (DB keeps all). `fill_missing`: items with no price get a stub row (`price:0, url:"", supplier:"—", name:"не знайдено"`) so Excel has one row per position. |
 | POST | `/api/stop` | Sets `state["stop_requested"]=True` if running. Returns immediately. |
 | GET | `/api/status` | Poll run status. Optional `?log_offset=N` → log lines from index N; without it, last 100 lines. |
 | POST | `/api/discover` | Discovery run: all suppliers, ignores SKIP_STALE_DAYS + session cache. Body like batch (no parallel/limit); forces `parallel_items=1`. |
@@ -514,6 +514,7 @@ SUPPLIERS = build_suppliers()   # module-level, built at import
 | `showPanel(name, btn)` | Switch panel + nav highlight |
 | `setMonitorMode(mode)` | `'single'`/`'batch'`/`'project'` sub-tabs. Single mode hosts the execution journal (`#t-body` terminal + `#log-sub` — there is NO separate Журнал nav tab; it was merged into Monitoring). Batch/project call `renderMonitorTab()`; project mode shows `#monitor-project-bar`. Monitoring is the default active panel on load. |
 | `onMonitorProjectChange()` | Loads `/api/projects/<id>/items` (file order) into `monitorQueue`; `monitorProjectId` global tags the run. `runBatch()` then sends `project_id` + `label: "Проект: <name>"`. |
+| `onSearchOptsChange()` / `renderSupplierOrderBox()` / `moveSupplierOrder()` | Batch toolbar checkboxes: `#opt-single-price` gates `#opt-best-price` (disabled+unchecked otherwise); single-without-best shows `#supplier-order-box` — active suppliers reorderable with ◀▶, order persisted in `localStorage['supplierOrder']`, sent as `supplier_order`. `#opt-fill-missing` → `fill_missing`. |
 | `onImportProjectChange()` | Import tab: "+ Новий проект…" option in `#import-project-select` reveals `#import-new-project-name` (prefilled from `importFilename`); `doImport()` sends `new_project_name`. |
 | `renderMonitorTab()` | Rebuild queue list, estimated time |
 | `runBatch()` | POST `/api/scrape/batch` → poll loop (1500 ms, `?log_offset=`) |
@@ -571,7 +572,7 @@ Dark-mode filter-button fix (keep):
 
 `_build_excel(results, label)` (pandas + openpyxl, in-memory):
 
-- One flat sheet "Ціни"; ⚠ **no blank separator rows and no 🥇🥈🥉 emoji** — top-3 cheapest per `item_label` group get **whole-row fills** (gold `FFF4C7` / silver `E5E5E5` / bronze `F4DBC1`) + bold colored price cell. Ranks computed on *distinct* prices; ties share a rank.
+- One flat sheet "Ціни"; ⚠ **no blank separator rows and no 🥇🥈🥉 emoji** — top-3 cheapest per `item_label` group get **whole-row fills** (gold `FFF4C7` / silver `E5E5E5` / bronze `F4DBC1`) + bold colored price cell. Ranks computed on *distinct* prices; ties share a rank. Prices ≤ 0 are excluded from ranking (fill_missing stub rows must never get a medal).
 - Column order = `COLUMN_ORDER`: Матеріал кошторису, Назва товару, Ціна за од., Валюта, Од., К-сть (кошторис), Од. (кошторис), Загальна ціна, Бренд, Артикул, Характеристики, Постачальник, Коментар, Посилання, Дата. ⚠ There is no `#`, no estimate-price and no Diff% column in this export.
 - Dark header row, auto column widths, saved to `exports/<label>_<timestamp>.xlsx` and streamed.
 

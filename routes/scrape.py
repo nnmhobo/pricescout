@@ -57,12 +57,17 @@ def scrape_batch():
     parallel_items = clamp_parallel(data.get("parallel_items"))
     effective_ids  = apply_limit(item_ids, data.get("limit"))
 
+    single_price = bool(data.get("single_price"))
     start_batch(
         item_ids, active_ids,
         parallel_items=parallel_items,
         limit=data.get("limit"),
         project_id=(data.get("project_id") or None),
         run_label=(data.get("label") or None),
+        single_price=single_price,
+        best_price=single_price and bool(data.get("best_price")),
+        supplier_order=(data.get("supplier_order") or None),
+        fill_missing=bool(data.get("fill_missing")),
     )
     return jsonify({
         "status":          "started",

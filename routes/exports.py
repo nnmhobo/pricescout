@@ -55,7 +55,9 @@ def _build_excel(results: list, label: str) -> tuple[bytes, str]:
     grouped_prices: dict[str, list[float]] = {}
     for r in results:
         p = r.get("price")
-        if p is None:
+        # Skip missing AND zero prices: fill_missing stub rows carry price 0
+        # and must never win a medal.
+        if p is None or float(p) <= 0:
             continue
         key = r.get("item_label") or r.get("name") or ""
         grouped_prices.setdefault(key, []).append(float(p))
@@ -68,7 +70,7 @@ def _build_excel(results: list, label: str) -> tuple[bytes, str]:
     ranks: list[int | None] = []
     for r in results:
         p = r.get("price")
-        if p is None:
+        if p is None or float(p) <= 0:
             ranks.append(None)
             continue
         key = r.get("item_label") or r.get("name") or ""

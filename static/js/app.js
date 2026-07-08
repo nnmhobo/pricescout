@@ -26,6 +26,9 @@
   let monitorMode   = 'single';
   let monitorProjectId = null;   // selected project in the "Проекти" monitor mode
   let importFilename   = '';     // name of the last parsed кошторис file
+  // User-arranged supplier priority for the single-price mode (persisted).
+  let supplierOrder = [];
+  try { supplierOrder = JSON.parse(localStorage.getItem('supplierOrder') || '[]'); } catch (e) {}
   // Server-reported absolute caps for batch parallelism. Fetched at boot.
   let serverConfig  = { max_parallel_items: 5, default_parallel_items: 3 };
   // Availability data cache
@@ -1197,6 +1200,64 @@
     renderMonitorTab();
   }
 
+  // ── Search-mode options (одна ціна / найменша / ціна 0) ──────
+  function onSearchOptsChange() {
+    const single    = document.getElementById('opt-single-price')?.checked || false;
+    const bestEl    = document.getElementById('opt-best-price');
+    const bestLabel = document.getElementById('opt-best-price-label');
+    if (bestEl) {
+      bestEl.disabled = !single;
+      if (!single) bestEl.checked = false;   // "найменша" only makes sense for one price
+    }
+    if (bestLabel) bestLabel.style.opacity = single ? '1' : '0.4';
+    renderSupplierOrderBox();
+  }
+
+  // Active suppliers (sidebar toggles) arranged by the user's saved priority;
+  // newly enabled suppliers append at the end in sidebar order.
+  function getOrderedActiveSuppliers() {
+    const enabled = getEnabledIds();
+    const known = supplierOrder.filter(id => enabled.includes(id));
+    const rest  = enabled.filter(id => !known.includes(id));
+    return known.concat(rest);
+  }
+
+  function renderSupplierOrderBox() {
+    const box = document.getElementById('supplier-order-box');
+    if (!box) return;
+    const single = document.getElementById('opt-single-price')?.checked || false;
+    const best   = document.getElementById('opt-best-price')?.checked || false;
+    // Visible only when we need ONE price WITHOUT best-price comparison —
+    // then the probing order decides which supplier's price wins.
+    const show = single && !best;
+    box.style.display = show ? 'flex' : 'none';
+    if (!show) return;
+    const ordered = getOrderedActiveSuppliers();
+    const list = document.getElementById('supplier-order-list');
+    if (!list) return;
+    list.innerHTML = ordered.map((id, i) => `
+      <div style="display:flex;align-items:center;gap:5px;padding:3px 6px;background:var(--paper);border:1px solid var(--border);border-radius:var(--r)">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--ink3)">${i + 1}.</span>
+        <span style="font-size:11px">${esc(SUPPLIER_NAMES[id] || id)}</span>
+        <button onclick="moveSupplierOrder('${id}',-1)" ${i === 0 ? 'disabled' : ''}
+                style="background:none;border:none;cursor:pointer;color:var(--ink3);font-size:11px;padding:0 2px" title="Раніше">◀</button>
+        <button onclick="moveSupplierOrder('${id}',1)" ${i === ordered.length - 1 ? 'disabled' : ''}
+                style="background:none;border:none;cursor:pointer;color:var(--ink3);font-size:11px;padding:0 2px" title="Пізніше">▶</button>
+      </div>`).join('') ||
+      '<span style="font-size:11px;color:var(--ink3)">Немає активних постачальників — увімкніть їх у лівій панелі</span>';
+  }
+
+  function moveSupplierOrder(id, dir) {
+    const ordered = getOrderedActiveSuppliers();
+    const i = ordered.indexOf(id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= ordered.length) return;
+    [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
+    supplierOrder = ordered;
+    try { localStorage.setItem('supplierOrder', JSON.stringify(supplierOrder)); } catch (e) {}
+    renderSupplierOrderBox();
+  }
+
   function renderMonitorTab() {
     const search = (document.getElementById('monitor-search')?.value || '').trim().toLowerCase();
     const filtered = monitorQueue.filter(i => !search || i.label.toLowerCase().includes(search));
@@ -1279,6 +1340,8 @@
         <td><button onclick="removeFromQueue('${item.id}')" style="background:none;border:none;cursor:pointer;color:var(--ink3);font-size:12px;padding:2px 4px" title="Видалити">✕</button></td>
       </tr>`;
     }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--ink3);padding:32px;font-size:13px">Черга порожня — додайте матеріали з Бази матеріалів</td></tr>';
+    // Keep the supplier-priority box in sync with the sidebar toggles.
+    renderSupplierOrderBox();
   }
 
   function addToQueue(item, skipRender = false) {
@@ -1433,6 +1496,16 @@
       const p = allProjects.find(pr => pr.id === monitorProjectId);
       if (p) payload.label = `Проект: ${p.name}`;
     }
+    // Search-mode options (одна ціна / найменша / ціна 0 для не знайдених).
+    const singlePrice = document.getElementById('opt-single-price')?.checked || false;
+    const bestPrice   = document.getElementById('opt-best-price')?.checked || false;
+    const fillMissing = document.getElementById('opt-fill-missing')?.checked || false;
+    if (singlePrice) {
+      payload.single_price = true;
+      if (bestPrice) payload.best_price = true;
+      else payload.supplier_order = getOrderedActiveSuppliers();
+    }
+    if (fillMissing) payload.fill_missing = true;
 
     const resp = await fetch('/api/scrape/batch', {
       method: 'POST',

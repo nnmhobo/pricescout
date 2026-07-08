@@ -253,6 +253,21 @@
             <input class="f-input" type="text" id="monitor-search" placeholder="Пошук…" oninput="renderMonitorTab()" style="width:160px;padding-right:22px">
             <button onclick="document.getElementById('monitor-search').value='';renderMonitorTab()" style="position:absolute;right:5px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--ink3);font-size:14px">×</button>
           </div>
+          <!-- Search-mode options -->
+          <div id="batch-opts" style="display:flex;align-items:center;gap:12px;flex-shrink:0;padding:5px 10px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
+            <label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;white-space:nowrap"
+                   title="Зупинятися після першої знайденої ціни для кожної позиції">
+              <input type="checkbox" id="opt-single-price" onchange="onSearchOptsChange()"> Пошук однієї ціни
+            </label>
+            <label id="opt-best-price-label" style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;white-space:nowrap;opacity:0.4"
+                   title="Опитати всіх постачальників і залишити найменшу ціну (доступно лише в режимі однієї ціни)">
+              <input type="checkbox" id="opt-best-price" onchange="onSearchOptsChange()" disabled> Найменша ціна
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;white-space:nowrap"
+                   title="Позиції без знайденої ціни отримають рядок з ціною 0 та порожнім посиланням — Excel міститиме всі позиції кошторису">
+              <input type="checkbox" id="opt-fill-missing"> Ціна 0, якщо не знайдено
+            </label>
+          </div>
           <div class="stop-tip-wrap" style="position:relative;display:none;flex-shrink:0" id="btn-stop-batch-wrap">
             <button id="btn-stop-batch" onclick="stopBatch()" style="padding:8px 16px;background:#c0392b;color:#fff;border:none;border-radius:var(--r);font-size:12px;font-weight:600;font-family:var(--sans);cursor:pointer;white-space:nowrap;width:100%">◼ Зупинити</button>
             <div class="stop-tip-box">
@@ -264,6 +279,14 @@
             <div class="run-icon"><svg width="7" height="9" viewBox="0 0 7 9" fill="var(--gold)"><path d="M0 0l7 4.5L0 9z"/></svg></div>
             Запустити чергу
           </button>
+        </div>
+
+        <!-- Supplier priority order (single-price mode without best-price) -->
+        <div id="supplier-order-box" style="display:none;flex-direction:column;gap:6px;padding:10px 12px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">
+            Порядок опитування постачальників — перша знайдена ціна зупиняє пошук позиції
+          </div>
+          <div id="supplier-order-list" style="display:flex;flex-wrap:wrap;gap:4px"></div>
         </div>
 
         <!-- Queue + Log side by side when running -->
