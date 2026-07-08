@@ -57,7 +57,13 @@ def scrape_batch():
     parallel_items = clamp_parallel(data.get("parallel_items"))
     effective_ids  = apply_limit(item_ids, data.get("limit"))
 
-    start_batch(item_ids, active_ids, parallel_items=parallel_items, limit=data.get("limit"))
+    start_batch(
+        item_ids, active_ids,
+        parallel_items=parallel_items,
+        limit=data.get("limit"),
+        project_id=(data.get("project_id") or None),
+        run_label=(data.get("label") or None),
+    )
     return jsonify({
         "status":          "started",
         "item_count":      len(effective_ids),
@@ -101,6 +107,7 @@ def status():
         "done_items":     sum(1 for s in item_states.values() if s.get("done")),
         "found_items":    sum(1 for s in item_states.values() if s.get("results")),
         "batch_started_at": state.get("batch_started_at"),
+        "project_id":     state.get("project_id"),
         "item_ids":       list(item_states.keys()),
     })
 

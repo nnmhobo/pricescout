@@ -134,11 +134,16 @@ All access goes through `core/item_db.py`, which uses a `@contextmanager get_con
 | avk_file | TEXT |
 
 ### `project_items`
-| Column | Type |
-|---|---|
-| project_id | TEXT, PK part |
-| item_id | TEXT, PK part |
-| added | TEXT (ISO datetime) |
+| Column | Type | Notes |
+|---|---|---|
+| project_id | TEXT, PK part | |
+| item_id | TEXT, PK part | |
+| added | TEXT (ISO datetime) | |
+| position | INTEGER | Row order of the imported кошторис file. NULL for pre-feature links (ordered by label as fallback). Manual adds append MAX+1. |
+| qty | REAL | **Per-project** quantity — overrides `items.qty` in `get_project_items()` so two projects can share a material with different amounts. |
+| estimate_unit_price | REAL | Per-project estimate price (same override rule). |
+
+A project mirrors ONE imported file: importing into a project **replaces** its link set ("sync to file") via `batch_add_items` — existing items (matched by label) are linked too, not just newly inserted ones.
 
 ### `price_history`
 | Column | Type | Notes |
@@ -207,7 +212,7 @@ All routes are Flask Blueprints registered in `app.py`. All return JSON unless n
 | Method | Path | Description |
 |---|---|---|
 | POST | `/api/scrape` | Single-item scrape. Body: `{item_id?, label?, suppliers:[{id, enabled}]}`. If `item_id` missing, looks the item up by `label` and **creates it** if not found. Internally runs a batch of one (`parallel_items=1`). |
-| POST | `/api/scrape/batch` | Start batch. Body: `{item_ids:[], suppliers:[{id, enabled}], parallel_items?, limit?}` |
+| POST | `/api/scrape/batch` | Start batch. Body: `{item_ids:[], suppliers:[{id, enabled}], parallel_items?, limit?, project_id?, label?}`. With `project_id`: per-project quantities override item qty for totals, and results keep `item_ids` order (file order) instead of alphabetical. `label` overrides the run label (e.g. `"Проект: Школа"`). |
 | POST | `/api/stop` | Sets `state["stop_requested"]=True` if running. Returns immediately. |
 | GET | `/api/status` | Poll run status. Optional `?log_offset=N` → log lines from index N; without it, last 100 lines. |
 | POST | `/api/discover` | Discovery run: all suppliers, ignores SKIP_STALE_DAYS + session cache. Body like batch (no parallel/limit); forces `parallel_items=1`. |
@@ -229,7 +234,8 @@ All routes are Flask Blueprints registered in `app.py`. All return JSON unless n
   "done_items": int,         // items with item_states[id].done == True
   "found_items": int,        // items with ≥1 result
   "batch_started_at": "ISO string",
-  "item_ids": ["...", ...]   // keys of item_states (frontend queue restore)
+  "project_id": "id or null", // set for project runs (frontend restores Проекти mode)
+  "item_ids": ["...", ...]   // keys of item_states (frontend queue restore, preserves order)
 }
 ```
 
@@ -263,7 +269,7 @@ All routes are Flask Blueprints registered in `app.py`. All return JSON unless n
 | Method | Path | Description |
 |---|---|---|
 | POST | `/api/kostoris/parse` | Multipart upload (`file`). Validates extension (`.xls`/`.xlsx`) and size (1 KB–20 MB), writes to a **temp file**, calls `parsers.kostoris_parser.parse(path)`. Returns `{total, retail, items, filename}` and saves it to `data/last_import.json`. Does NOT touch the DB. |
-| POST | `/api/kostoris/import` | Body: `{items: [{name, code?, category?, qty?, unit?, unit_price?}], project_id?}` (legacy alt: `{names: [...]}`). Maps to DB fields (`name`→label, `code`→avk_code, `unit_price`→estimate_unit_price) and bulk-inserts via `batch_add_items` (dedupe by existing label). Returns `{added, skipped, project_id}`. |
+| POST | `/api/kostoris/import` | Body: `{items: [ORDERED {name, code?, category?, qty?, unit?, unit_price?}], project_id? \| new_project_name?, filename?}` (legacy alt: `{names: [...]}`). `new_project_name` creates the project first (`filename` stored as `avk_file`). Bulk-inserts via `batch_add_items`: new items created, existing (by label) reused, ALL linked to the project with positions (sync-to-file). Returns `{added, linked, skipped, project_id, project_name}`. |
 | GET | `/api/kostoris/last` | Returns `data/last_import.json` content or `null`. |
 
 ### Projects routes (`routes/projects.py`)
@@ -275,7 +281,7 @@ All routes are Flask Blueprints registered in `app.py`. All return JSON unless n
 | GET | `/api/projects/<id>` | Project + `item_count`. |
 | PATCH | `/api/projects/<id>` | Update `name`/`description`/`avk_file`. |
 | DELETE | `/api/projects/<id>` | Delete project + its junction rows (items survive). |
-| GET | `/api/projects/<id>/items` | Items enriched with `best_price`, `best_supplier`, `total_best`, `total_estimate`, `saving_pct` (honours per-result `manual_price`). |
+| GET | `/api/projects/<id>/items` | Items in **file order** (`project_items.position`), enriched with `best_price`, `best_supplier`, `total_best`, `total_estimate`, `saving_pct` (honours per-result `manual_price`). Per-project qty/estimate price already spliced in by `get_project_items()`. |
 | POST | `/api/projects/<id>/items` | Body: `{item_id}` → junction insert. |
 | DELETE | `/api/projects/<id>/items/<item_id>` | Junction delete. |
 | GET | `/api/projects/<id>/summary` | `{project, item_count, items_with_price, total_estimate, total_best, saving, saving_pct}` |
@@ -506,7 +512,9 @@ SUPPLIERS = build_suppliers()   # module-level, built at import
 | Function | Description |
 |---|---|
 | `showPanel(name, btn)` | Switch panel + nav highlight |
-| `setMonitorMode(mode)` | `'single'`/`'batch'` sub-tabs; calls `renderMonitorTab()` |
+| `setMonitorMode(mode)` | `'single'`/`'batch'`/`'project'` sub-tabs; calls `renderMonitorTab()`. Project mode shows `#monitor-project-bar` and shares the batch panel. |
+| `onMonitorProjectChange()` | Loads `/api/projects/<id>/items` (file order) into `monitorQueue`; `monitorProjectId` global tags the run. `runBatch()` then sends `project_id` + `label: "Проект: <name>"`. |
+| `onImportProjectChange()` | Import tab: "+ Новий проект…" option in `#import-project-select` reveals `#import-new-project-name` (prefilled from `importFilename`); `doImport()` sends `new_project_name`. |
 | `renderMonitorTab()` | Rebuild queue list, estimated time |
 | `runBatch()` | POST `/api/scrape/batch` → poll loop (1500 ms, `?log_offset=`) |
 | `stopBatch()` | POST `/api/stop`, sets `batchStopped=true`, disables button |

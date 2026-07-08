@@ -188,11 +188,14 @@ def _scrape_one_supplier(supplier, label, item, ilog):
     return supplier, result, found_url, saved_entry, saved_url
 
 
-def _run_single_item(item_id: str, active_suppliers: list, discovery_mode: bool = False) -> None:
+def _run_single_item(item_id: str, active_suppliers: list, discovery_mode: bool = False,
+                     qty_override: float | None = None) -> None:
     """Scrape one item across its routed suppliers. Results land in
     item_states[item_id] and in core.state.
 
     discovery_mode=True: skip cache and smart-skip, force all suppliers.
+    qty_override: per-project quantity (project runs) — replaces the shared
+    item qty so totals match the project's кошторис.
     """
     # Cooperative stop: once the user hits stop, every item still queued
     # in the pool must become an instant no-op. Without this the batch
@@ -204,6 +207,8 @@ def _run_single_item(item_id: str, active_suppliers: list, discovery_mode: bool 
     item = get_item(item_id)
     if not item:
         return
+    if qty_override is not None:
+        item["qty"] = qty_override
 
     # `search_label` is the query we feed to suppliers (a shortened version
     # of the кошторис row, e.g. "Ceresit CT 225"). `display_label` is what
@@ -363,6 +368,8 @@ def _run_batch(
     parallel_items: int | None = None,
     limit: int | None = None,
     discovery_mode: bool = False,
+    project_id: str | None = None,
+    run_label: str | None = None,
 ) -> None:
     """Main batch orchestrator. Runs in a background thread.
 
@@ -393,12 +400,24 @@ def _run_batch(
     state["parallel_items"] = workers
     state["limit"] = len(item_ids)
     state["total_items"] = total_requested
+    state["project_id"] = project_id
+    base_label = run_label or ("Discovery" if discovery_mode else "Черга")
     if total_requested and len(item_ids) < total_requested:
-        state["label"] = (
-            f"{'Discovery' if discovery_mode else 'Черга'} ({len(item_ids)} з {total_requested} матеріалів)"
-        )
+        state["label"] = f"{base_label} ({len(item_ids)} з {total_requested} матеріалів)"
     else:
-        state["label"] = f"{'Discovery' if discovery_mode else 'Черга'} ({len(item_ids)} матеріалів)"
+        state["label"] = f"{base_label} ({len(item_ids)} матеріалів)"
+
+    # Project runs: per-project quantities (from project_items links) replace
+    # the shared item qty so totals match THIS project's кошторис.
+    qty_overrides: dict[str, float] = {}
+    if project_id:
+        try:
+            from core.item_db import get_project_items
+            for pi in get_project_items(project_id):
+                if pi.get("qty") is not None:
+                    qty_overrides[pi["id"]] = pi["qty"]
+        except Exception as exc:
+            log(f"Не вдалося завантажити кількості проекту: {exc}")
 
     item_states.clear()
     item_states.update({
@@ -424,7 +443,10 @@ def _run_batch(
             for iid in item_ids:
                 if state.get("stop_requested"):
                     break
-                futures.append(pool.submit(_run_single_item, iid, active_suppliers, discovery_mode))
+                futures.append(pool.submit(
+                    _run_single_item, iid, active_suppliers, discovery_mode,
+                    qty_overrides.get(iid),
+                ))
             for fut in as_completed(futures):
                 try:
                     fut.result()
@@ -447,7 +469,20 @@ def _run_batch(
         for iid in item_ids:
             run_results.extend(item_states.get(iid, {}).get("results", []))
 
-        state["results"] = sort_results(apply_overrides(run_results))
+        if project_id:
+            # Project runs keep the imported file's order: item_ids already
+            # follow project positions, so sort by that sequence (suppliers
+            # alphabetical inside each item). Results tab + Excel then match
+            # the кошторис row order.
+            order = {iid: n for n, iid in enumerate(item_ids)}
+            run_results = apply_overrides(run_results)
+            run_results.sort(key=lambda r: (
+                order.get(r.get("item_id"), len(order)),
+                _ua_sort_key(r.get("supplier")),
+            ))
+            state["results"] = run_results
+        else:
+            state["results"] = sort_results(apply_overrides(run_results))
         state["last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
         stopped_note = " (зупинено)" if state.get("stop_requested") else ""
         log(f"Все готово{stopped_note}. {len(run_results)} цін по {len(item_ids)} матеріалах.")
@@ -476,10 +511,18 @@ def start_batch(
     parallel_items: int | None = None,
     limit: int | None = None,
     discovery_mode: bool = False,
+    project_id: str | None = None,
+    run_label: str | None = None,
 ) -> None:
     threading.Thread(
         target=_run_batch,
         args=(item_ids, active_supplier_ids),
-        kwargs={"parallel_items": parallel_items, "limit": limit, "discovery_mode": discovery_mode},
+        kwargs={
+            "parallel_items": parallel_items,
+            "limit": limit,
+            "discovery_mode": discovery_mode,
+            "project_id": project_id,
+            "run_label": run_label,
+        },
         daemon=True,
     ).start()

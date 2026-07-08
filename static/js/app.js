@@ -24,6 +24,8 @@
   let monitorQueue  = [];
   let monitorDone   = 0;
   let monitorMode   = 'single';
+  let monitorProjectId = null;   // selected project in the "Проекти" monitor mode
+  let importFilename   = '';     // name of the last parsed кошторис file
   // Server-reported absolute caps for batch parallelism. Fetched at boot.
   let serverConfig  = { max_parallel_items: 5, default_parallel_items: 3 };
   // Availability data cache
@@ -207,7 +209,8 @@
         const monBtn = Array.from(document.querySelectorAll('.nav-btn'))
           .find(b => b.textContent.trim() === 'Моніторинг');
         showPanel('monitor', monBtn);
-        setMonitorMode('batch');   // sets correct tab highlight + shows batch panel
+        if (d.project_id) monitorProjectId = d.project_id;
+        setMonitorMode(d.project_id ? 'project' : 'batch');   // sets correct tab highlight + shows batch panel
         document.getElementById('batch-log-wrap').style.display = 'flex';
         document.getElementById('btn-run-batch').disabled = true;
         const stopBtn = document.getElementById('btn-stop-batch');
@@ -279,6 +282,7 @@
   fetch('/api/kostoris/last').then(r => r.json()).then(d => {
     if (!d || !d.items || !d.items.length) return;
     importItems = d.items;
+    importFilename = d.filename || '';
     selectedNames = new Set(d.items.map(i => i.name));
     document.getElementById('imp-total').textContent  = d.total;
     document.getElementById('imp-sel').textContent    = selectedNames.size;
@@ -716,6 +720,7 @@
           return;
         }
         importItems = d.items;
+        importFilename = file.name;
         selectedNames = new Set(importItems.map(i => i.name));
         document.getElementById('imp-total').textContent = d.total;
         document.getElementById('import-stats-row').style.display = '';
@@ -831,18 +836,37 @@
         unit_price: i.unit_price,
       }));
     const projectSel = document.getElementById('import-project-select');
-    const project_id = projectSel ? (projectSel.value || null) : null;
+    const selVal = projectSel ? projectSel.value : '';
+    const body = { items, filename: importFilename || null };
+    if (selVal === '__new__') {
+      const name = (document.getElementById('import-new-project-name')?.value || '').trim();
+      if (!name) { shake('import-new-project-name'); return; }
+      body.new_project_name = name;
+    } else if (selVal) {
+      body.project_id = selVal;
+    }
+
     const d = await fetch('/api/kostoris/import', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ items, project_id })
+      body: JSON.stringify(body)
     }).then(r => r.json());
+    if (d.error) { alert(d.error); return; }
 
-    const skippedMsg = d.skipped ? `, вже існує: ${d.skipped}` : '';
-    const projMsg    = d.project_id ? ' → проект' : '';
-    document.getElementById('import-result').textContent = `Додано: ${d.added}${skippedMsg}${projMsg}`;
+    // linked = rows tied to the project (new AND already-existing items);
+    // skipped = empty / in-file duplicated rows.
+    const linkedMsg  = d.linked ? `, у проект: ${d.linked}` : '';
+    const skippedMsg = d.skipped ? `, пропущено: ${d.skipped}` : '';
+    const projMsg    = d.project_name ? ` → «${d.project_name}»` : (d.project_id ? ' → проект' : '');
+    document.getElementById('import-result').textContent = `Додано нових: ${d.added}${linkedMsg}${skippedMsg}${projMsg}`;
     loadItems();
-    if (d.added > 0) { loadItemsTab(); loadProjects(); }
+    loadItemsTab();
+    await loadProjects();
+    if (d.project_id && projectSel) {
+      projectSel.value = d.project_id;           // freshly created project stays selected
+      const inp = document.getElementById('import-new-project-name');
+      if (inp) { inp.style.display = 'none'; inp.value = ''; }
+    }
   }
 
   // ── Items DB tab ─────────────────────────────────────────────
@@ -1074,13 +1098,62 @@
       showPanel('log', logBtn);
       return;
     }
-    monitorMode = 'batch';
+    // 'batch' (ad-hoc queue) and 'project' (queue = one project's items in
+    // imported-file order) share the same batch panel; project mode just
+    // adds a project selector bar and tags the run with project_id.
+    monitorMode = mode === 'project' ? 'project' : 'batch';
     document.getElementById('monitor-single').style.display = 'none';
     document.getElementById('monitor-batch').style.display = 'flex';
-    document.getElementById('mode-single').style.background = 'transparent';
-    document.getElementById('mode-single').style.color = 'var(--ink3)';
-    document.getElementById('mode-batch').style.background = 'var(--gold)';
-    document.getElementById('mode-batch').style.color = '#fff';
+    const paint = (id, active) => {
+      const b = document.getElementById(id);
+      if (!b) return;
+      b.style.background = active ? 'var(--gold)' : 'transparent';
+      b.style.color = active ? '#fff' : 'var(--ink3)';
+    };
+    paint('mode-single', false);
+    paint('mode-batch', monitorMode === 'batch');
+    paint('mode-project', monitorMode === 'project');
+    const projBar = document.getElementById('monitor-project-bar');
+    if (projBar) projBar.style.display = monitorMode === 'project' ? 'flex' : 'none';
+    if (monitorMode === 'project') populateMonitorProjectSelect();
+    renderMonitorTab();
+  }
+
+  async function populateMonitorProjectSelect() {
+    const sel = document.getElementById('monitor-project-select');
+    if (!sel) return;
+    if (!allProjects.length) {
+      try { allProjects = await fetch('/api/projects').then(r => r.json()); } catch (e) {}
+    }
+    const cur = monitorProjectId || sel.value;
+    sel.innerHTML = '<option value="">— оберіть проект —</option>' +
+      allProjects.map(p => `<option value="${esc(p.id)}" ${p.id === cur ? 'selected' : ''}>${esc(p.name)} (${p.item_count} поз.)</option>`).join('');
+    // Auto-load the queue for the pre-selected project — but never while a
+    // batch is running/reconnecting (the reconnect path restores the queue
+    // from the server's item_ids, which respects the run's limit).
+    if (cur && sel.value === cur && !monitorQueue.length && !batchRunning) onMonitorProjectChange();
+  }
+
+  async function onMonitorProjectChange() {
+    const sel = document.getElementById('monitor-project-select');
+    monitorProjectId = (sel && sel.value) || null;
+    const info = document.getElementById('monitor-project-info');
+    if (!monitorProjectId) {
+      monitorQueue = [];
+      monitorDone = 0;
+      if (info) info.textContent = '';
+      renderMonitorTab();
+      return;
+    }
+    try {
+      // Backend returns items in the imported file's row order (position).
+      const items = await fetch(`/api/projects/${monitorProjectId}/items`).then(r => r.json());
+      monitorQueue = Array.isArray(items) ? items : [];
+      monitorDone = 0;
+      if (info) info.textContent = `${monitorQueue.length} матеріалів у порядку кошторису`;
+    } catch (e) {
+      if (info) info.textContent = 'Не вдалося завантажити проект';
+    }
     renderMonitorTab();
   }
 
@@ -1349,6 +1422,13 @@
       parallel_items: parallel,
     };
     if (limit > 0) payload.limit = limit;
+    // Project runs: backend keeps results in the file order and uses the
+    // project's per-item quantities for totals.
+    if (monitorMode === 'project' && monitorProjectId) {
+      payload.project_id = monitorProjectId;
+      const p = allProjects.find(pr => pr.id === monitorProjectId);
+      if (p) payload.label = `Проект: ${p.name}`;
+    }
 
     const resp = await fetch('/api/scrape/batch', {
       method: 'POST',
@@ -1576,7 +1656,21 @@
     if (!sel) return;
     const cur = sel.value;
     sel.innerHTML = '<option value="">— без проекту —</option>' +
+      '<option value="__new__"' + (cur === '__new__' ? ' selected' : '') + '>+ Новий проект…</option>' +
       allProjects.map(p => `<option value="${esc(p.id)}" ${p.id===cur?'selected':''}>${esc(p.name)} (${p.item_count} поз.)</option>`).join('');
+  }
+
+  function onImportProjectChange() {
+    const sel = document.getElementById('import-project-select');
+    const inp = document.getElementById('import-new-project-name');
+    if (!sel || !inp) return;
+    if (sel.value === '__new__') {
+      inp.style.display = '';
+      if (!inp.value) inp.value = (importFilename || '').replace(/\.(xls|xlsx)$/i, '');
+      inp.focus();
+    } else {
+      inp.style.display = 'none';
+    }
   }
 
   function showCreateProject() {

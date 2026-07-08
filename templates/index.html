@@ -184,6 +184,10 @@
             style="padding:5px 14px;border:none;border-radius:calc(var(--r-lg) - 2px);font-size:11px;font-weight:500;font-family:var(--sans);cursor:pointer;background:transparent;color:var(--ink3);transition:all 0.15s">
             Черга
           </button>
+          <button id="mode-project" onclick="setMonitorMode('project')"
+            style="padding:5px 14px;border:none;border-radius:calc(var(--r-lg) - 2px);font-size:11px;font-weight:500;font-family:var(--sans);cursor:pointer;background:transparent;color:var(--ink3);transition:all 0.15s">
+            Проекти
+          </button>
         </div>
       </div>
 
@@ -202,6 +206,15 @@
 
       <!-- Batch mode -->
       <div id="monitor-batch" style="display:none;flex:1;flex-direction:column;gap:6px;min-height:0">
+        <!-- Project picker (visible only in "Проекти" mode) -->
+        <div id="monitor-project-bar" style="display:none;align-items:center;gap:10px;padding:8px 12px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg)">
+          <span style="font-size:10px;color:var(--ink3);text-transform:uppercase;letter-spacing:0.08em;flex-shrink:0">Проект</span>
+          <select id="monitor-project-select" onchange="onMonitorProjectChange()"
+                  style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans);min-width:240px">
+            <option value="">— оберіть проект —</option>
+          </select>
+          <span id="monitor-project-info" style="font-size:11px;color:var(--ink3)"></span>
+        </div>
         <!-- Single toolbar row: stats + controls -->
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <div style="display:flex;gap:6px;flex-shrink:0">
@@ -457,10 +470,12 @@
           </button>
           <div style="display:flex;flex-direction:column;gap:2px">
             <span style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Прив'язати до проекту</span>
-            <select id="import-project-select" style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans);min-width:160px">
+            <select id="import-project-select" onchange="onImportProjectChange()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans);min-width:160px">
               <option value="">— без проекту —</option>
             </select>
           </div>
+          <input id="import-new-project-name" type="text" placeholder="Назва нового проекту"
+                 style="display:none;font-size:12px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans);min-width:200px;align-self:flex-end">
           <span id="import-result" style="font-size:12px;color:var(--teal)"></span>
         </div>
       </div>
