@@ -13,6 +13,7 @@ it must import ONLY the standard library (tkinter, subprocess, urllib, …).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import threading
@@ -32,6 +33,12 @@ SETUP_MARK = VENV_DIR / ".setup_done"
 
 # Hide child console windows (we are running under pythonw).
 CREATE_NO_WINDOW = 0x08000000
+
+# Child processes write to PIPES (no console): without this, Windows Python
+# encodes their stdout with the locale codepage (cp1252) and app.py's
+# Ukrainian startup banner crashes with UnicodeEncodeError. Forcing UTF-8
+# also makes unspecified open() calls inside the app behave sanely.
+CHILD_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
 
 MAX_LOG_LINES = 2000
 
@@ -175,7 +182,7 @@ class LauncherApp:
         self.log(f"$ {' '.join(str(c) for c in cmd)}")
         try:
             p = subprocess.Popen(
-                cmd, cwd=str(ROOT),
+                cmd, cwd=str(ROOT), env=CHILD_ENV,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace",
                 creationflags=CREATE_NO_WINDOW,
@@ -257,7 +264,7 @@ class LauncherApp:
         self.mark_step(3, "run")
         self.set_status("Запускаємо сервер…")
         self.proc = subprocess.Popen(
-            [str(VENV_PY), "app.py"], cwd=str(ROOT),
+            [str(VENV_PY), "app.py"], cwd=str(ROOT), env=CHILD_ENV,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace",
             creationflags=CREATE_NO_WINDOW,

@@ -1,6 +1,15 @@
 """PriceScout — Flask app factory."""
 import os
+import sys
 import time
+
+# Windows: when stdout is a pipe (GUI launcher) or a cp1252 console, printing
+# the Ukrainian banner/log lines would raise UnicodeEncodeError. Force UTF-8.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 from pathlib import Path
 from dotenv import load_dotenv
 from flask import Flask, render_template
