@@ -26,7 +26,8 @@ pricescout/
 ├── app.py                  # Flask app + index route (no factory function; module-level `app`)
 ├── README.md               # User-facing readme, English (renamed from README_EN.md)
 ├── README_UA.md            # User-facing readme, Ukrainian
-├── START.bat               # Windows launcher (venv + deps + `scrapling install`)
+├── START.bat               # Silent launcher → `pythonw setup_gui.py` (console only if Python missing)
+├── setup_gui.py            # tkinter installer/launcher window — STDLIB ONLY (runs on system Python before the venv exists)
 ├── requirements.txt        # flask, scrapling[fetchers], lxml, xlrd, pandas, openpyxl, python-dotenv, rapidfuzz, requests
 ├── .env                    # (not committed) env overrides
 ├── pricescout.db           # SQLite database (WAL mode)
@@ -664,17 +665,23 @@ Run: `python -m pytest tests/ -v` — no network, pure logic.
 ## 17. Startup Sequence
 
 ```
-START.bat
-  → checks Python ≥3.10 on PATH
-  → creates .venv (first run)
-  → pip install -r requirements.txt + `scrapling install`
-    (fallback: python -m playwright install chromium) — once, marked by .venv\.setup_done
-  → opens http://localhost:5000 via PowerShell after 5 s
-  → python app.py
-      → load_dotenv()
-      → Flask(__name__) + register 5 blueprints
-      → AT IMPORT TIME: init_db() (tables + _migrate()), ensure_exports_dir(), ensure_debug_dir()
-      → app.run(debug=False, host="0.0.0.0", port=PORT, threaded=True)
+START.bat  (silent: only errors if Python itself is missing)
+  → start pythonw setup_gui.py
+setup_gui.py  (tkinter window, STDLIB ONLY — system Python, pre-venv)
+  → checks Python ≥3.10 (messagebox on failure)
+  → if http://localhost:PORT already answers → "вже запущено", open browser, exit setup path
+  → first run (.venv\.setup_done missing): venv → pip install -r requirements.txt
+    → scrapling.exe install (fallback: python -m playwright install chromium) — with
+    progress steps + collapsible log; marker touched on success
+  → Popen(.venv\Scripts\python.exe app.py, CREATE_NO_WINDOW), streams server output
+    into the log, waits for the HTTP endpoint (≤90 s), opens the browser
+  → window = server controller: «Відкрити у браузері» / «Зупинити»; closing the
+    window terminates the server process
+app.py
+  → load_dotenv()
+  → Flask(__name__) + register 5 blueprints
+  → AT IMPORT TIME: init_db() (tables + _migrate()), ensure_exports_dir(), ensure_debug_dir()
+  → app.run(debug=False, host="0.0.0.0", port=PORT, threaded=True)
 ```
 
-⚠ `init_db()` runs at module import (so WSGI servers get it too). ⚠ Binds `0.0.0.0` — LAN-exposed, no auth.
+⚠ `init_db()` runs at module import (so WSGI servers get it too). ⚠ Binds `0.0.0.0` — LAN-exposed, no auth. ⚠ `setup_gui.py` must stay stdlib-only — it executes before any dependency exists.
