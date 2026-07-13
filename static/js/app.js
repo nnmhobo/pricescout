@@ -152,7 +152,7 @@
       setTimeout(() => {
         document.getElementById('import-stats-row').style.display = '';
         document.getElementById('import-table-wrap').style.display = 'flex';
-        document.getElementById('btn-do-import').disabled = selectedNames.size === 0;
+        _setImportButtons(selectedNames.size === 0);
         if (document.getElementById('import-tbody').innerHTML === '') {
           buildCategoryFilters();
           renderImportTable();
@@ -370,10 +370,11 @@
     importFilename = d.filename || '';
     selectedNames = new Set(d.items.map(i => i.name));
     document.getElementById('imp-total').textContent  = d.total;
+    _showMergedNote(d);
     document.getElementById('imp-sel').textContent    = selectedNames.size;
     document.getElementById('import-stats-row').style.display = '';
     document.getElementById('import-table-wrap').style.display = 'flex';
-    document.getElementById('btn-do-import').disabled = false;
+    _setImportButtons(false);
     const drop = document.getElementById('import-drop');
     drop.querySelector('.import-drop-txt').textContent = '✓ ' + (d.filename || 'останній імпорт');
     drop.querySelector('.import-drop-icon').style.display = 'none';
@@ -750,28 +751,88 @@
   }
 
   // ── Exports ───────────────────────────────────────────────────
+  // Exports are grouped by origin: monitoring runs vs URL-enriched кошториси
+  // (legacy pre-split files are shown under monitoring).
+  function _exportsGroupHtml(title, files) {
+    if (!files.length) return '';
+    return `
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3);margin:10px 0 6px">${title}</div>
+      <div class="exports-table">
+        <div class="et-head"><span>Файл</span><span>Розмір</span><span>Дата</span><span></span></div>
+        ${files.map(f => `
+          <div class="et-row">
+            <div class="et-name"><a href="/api/exports/${esc(f.type)}/${encodeURIComponent(f.filename)}" download="${esc(f.filename)}">${esc(f.filename)}</a></div>
+            <div class="et-size">${f.size_kb} КБ</div>
+            <div class="et-date">${esc(f.created)}</div>
+            <div class="et-del"><button onclick="deleteExport('${esc(f.type)}','${esc(f.filename)}')" title="Видалити">×</button></div>
+          </div>`).join('')}
+      </div>`;
+  }
+
   function loadExports() {
     fetch('/api/exports').then(r => r.json()).then(files => {
       const el = document.getElementById('exports-container');
       if (!files.length) { el.innerHTML = '<div class="exports-empty">Немає збережених експортів</div>'; return; }
-      el.innerHTML = `
-        <div class="exports-table">
-          <div class="et-head"><span>Файл</span><span>Розмір</span><span>Дата</span><span></span></div>
-          ${files.map(f => `
-            <div class="et-row">
-              <div class="et-name"><a href="/api/exports/${esc(f.filename)}" download="${esc(f.filename)}">${esc(f.filename)}</a></div>
-              <div class="et-size">${f.size_kb} КБ</div>
-              <div class="et-date">${esc(f.created)}</div>
-              <div class="et-del"><button onclick="deleteExport('${esc(f.filename)}')" title="Видалити">×</button></div>
-            </div>`).join('')}
-        </div>`;
+      const urls = files.filter(f => f.type === 'urls');
+      const monitoring = files.filter(f => f.type !== 'urls');
+      el.innerHTML =
+        _exportsGroupHtml('Моніторинг', monitoring) +
+        _exportsGroupHtml('Кошториси з посиланнями', urls);
     });
   }
 
-  function deleteExport(filename) {
+  function deleteExport(etype, filename) {
     if (!confirm(`Видалити ${filename}?`)) return;
-    fetch(`/api/exports/${encodeURIComponent(filename)}`, {method:'DELETE'})
+    fetch(`/api/exports/${encodeURIComponent(etype)}/${encodeURIComponent(filename)}`, {method:'DELETE'})
       .then(() => loadExports());
+  }
+
+  // ── URL enrichment of an uploaded кошторис ────────────────────
+  async function runAddUrls() {
+    const inp = document.getElementById('urls-file');
+    const res = document.getElementById('urls-result');
+    const btn = document.getElementById('urls-run-btn');
+    if (!inp || !inp.files || !inp.files.length) {
+      if (res) { res.style.color = 'var(--danger)'; res.textContent = 'Оберіть файл .xls/.xlsx'; }
+      return;
+    }
+    const fd = new FormData();
+    fd.append('file', inp.files[0]);
+    const colMode = document.getElementById('urls-col-mode')?.value || '';
+    if (colMode === 'custom') {
+      const letter = (document.getElementById('urls-col-letter')?.value || '').trim();
+      if (!/^[A-Za-z]{1,3}$/.test(letter)) {
+        if (res) { res.style.color = 'var(--danger)'; res.textContent = 'Вкажіть колонку літерою, напр. K'; }
+        return;
+      }
+      fd.append('column', letter);
+    }
+    fd.append('dups', document.getElementById('urls-dups')?.value || 'all');
+
+    if (btn) btn.disabled = true;
+    if (res) { res.style.color = 'var(--ink3)'; res.textContent = 'Обробляємо…'; }
+    try {
+      const d = await fetch('/api/exports/add-urls', { method: 'POST', body: fd }).then(r => r.json());
+      if (d.error) {
+        if (res) { res.style.color = 'var(--danger)'; res.textContent = '⚠ ' + d.error; }
+        return;
+      }
+      const dupNote  = d.dup_skipped ? `, пропущено повторів: ${d.dup_skipped}` : '';
+      const convNote = d.converted_from_xls ? ' (перетворено у .xlsx)' : '';
+      if (res) {
+        res.style.color = 'var(--teal)';
+        res.textContent = `✓ Посилань додано: ${d.filled} з ${d.rows} позицій${dupNote}${convNote}`;
+      }
+      // Auto-download the produced file + refresh the list.
+      const a = document.createElement('a');
+      a.href = d.download; a.download = d.filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      loadExports();
+    } catch (e) {
+      if (res) { res.style.color = 'var(--danger)'; res.textContent = 'Помилка: ' + e; }
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   // ── Helpers ───────────────────────────────────────────────────
@@ -801,6 +862,21 @@
     if (f) parseKostoris(f);
   }
 
+  // "544 рядків → 487 матеріалів (57 повторів об'єднано)" note — the same
+  // material appears under several work sections in АВК-5 files; the parser
+  // merges them and SUMS the quantities.
+  function _showMergedNote(d) {
+    const mrg = document.getElementById('imp-merged');
+    if (!mrg) return;
+    if (d && d.merged > 0) {
+      mrg.textContent = `${d.rows_total} рядків у файлі → ${d.total} матеріалів ` +
+                        `(${d.merged} повторів)`;
+      mrg.style.display = '';
+    } else {
+      mrg.style.display = 'none';
+    }
+  }
+
   function parseKostoris(file) {
     if (!file) return;
     const drop = document.getElementById('import-drop');
@@ -821,6 +897,7 @@
         importFilename = file.name;
         selectedNames = new Set(importItems.map(i => i.name));
         document.getElementById('imp-total').textContent = d.total;
+        _showMergedNote(d);
         document.getElementById('import-stats-row').style.display = '';
         document.getElementById('import-table-wrap').style.display = 'flex';
         drop.querySelector('.import-drop-txt').textContent = '✓ ' + file.name;
@@ -887,12 +964,12 @@
         <td>${esc(i.name)}</td>
         <td style="font-family:var(--mono);font-size:10px;color:var(--ink3)">${esc(i.code)}</td>
         <td style="font-family:var(--mono);font-size:11px">${esc(i.unit||'')}</td>
-        <td style="font-family:var(--mono);font-size:11px">${i.qty||''}</td>
+        <td style="font-family:var(--mono);font-size:11px">${i.qty||''}${i.rows > 1 ? ` <span style="font-size:9px;padding:0 4px;background:var(--paper2);color:var(--ink3);border-radius:3px" title="Кількість підсумовано з ${i.rows} рядків файлу">×${i.rows}</span>` : ''}</td>
         <td style="font-family:var(--mono);font-size:11px">${i.unit_price ? Number(i.unit_price).toLocaleString('uk-UA') + ' ₴' : '—'}</td>
         <td><span style="display:inline-block;padding:1px 5px;background:var(--paper2);color:var(--ink3);border-radius:3px;font-size:9px">${esc(i.category)}</span></td>
       </tr>`).join('');
     document.getElementById('imp-sel').textContent = selectedNames.size;
-    document.getElementById('btn-do-import').disabled = selectedNames.size === 0;
+    _setImportButtons(selectedNames.size === 0);
     const chkAll = document.getElementById('chk-all');
     if (chkAll) {
       const allChecked = filtered.length > 0 && filtered.every(i => selectedNames.has(i.name));
@@ -906,7 +983,7 @@
     if (cb.checked) selectedNames.add(name);
     else selectedNames.delete(name);
     document.getElementById('imp-sel').textContent = selectedNames.size;
-    document.getElementById('btn-do-import').disabled = selectedNames.size === 0;
+    _setImportButtons(selectedNames.size === 0);
   }
 
   function selectAll(checked) {
@@ -922,26 +999,47 @@
     renderImportTable();
   }
 
-  async function doImport() {
+  function _setImportButtons(disabled) {
+    const b1 = document.getElementById('btn-do-import');
+    const b2 = document.getElementById('btn-import-project');
+    if (b1) b1.disabled = disabled;
+    if (b2) b2.disabled = disabled;
+  }
+
+  // toProject=false: just add unique materials to the shared DB.
+  // toProject=true:  additionally link the selection to the chosen project;
+  //   the "зберегти порядок файлу" checkbox picks between 1:1 file mirroring
+  //   (duplicates kept, for the URL column) and merge+sum.
+  async function doImport(toProject) {
     const items = importItems
       .filter(i => selectedNames.has(i.name))
       .map(i => ({
-        name:       i.name,
-        code:       i.code,
-        category:   i.category,
-        qty:        i.qty,
-        unit:       i.unit,
-        unit_price: i.unit_price,
+        name:        i.name,
+        code:        i.code,
+        category:    i.category,
+        qty:         i.qty,
+        unit:        i.unit,
+        unit_price:  i.unit_price,
+        occurrences: i.occurrences,   // per-source-row data for keep-order mode
       }));
     const projectSel = document.getElementById('import-project-select');
     const selVal = projectSel ? projectSel.value : '';
     const body = { items, filename: importFilename || null };
-    if (selVal === '__new__') {
-      const name = (document.getElementById('import-new-project-name')?.value || '').trim();
-      if (!name) { shake('import-new-project-name'); return; }
-      body.new_project_name = name;
-    } else if (selVal) {
-      body.project_id = selVal;
+
+    if (toProject) {
+      if (selVal === '__new__') {
+        const name = (document.getElementById('import-new-project-name')?.value || '').trim();
+        if (!name) { shake('import-new-project-name'); return; }
+        body.new_project_name = name;
+      } else if (selVal) {
+        body.project_id = selVal;
+      } else {
+        shake('import-project-select');
+        const res = document.getElementById('import-result');
+        if (res) { res.textContent = 'Оберіть проект або створіть новий'; }
+        return;
+      }
+      body.keep_order = !!document.getElementById('import-keep-order')?.checked;
     }
 
     const d = await fetch('/api/kostoris/import', {
@@ -951,12 +1049,15 @@
     }).then(r => r.json());
     if (d.error) { alert(d.error); return; }
 
-    // linked = rows tied to the project (new AND already-existing items);
-    // skipped = empty / in-file duplicated rows.
-    const linkedMsg  = d.linked ? `, у проект: ${d.linked}` : '';
-    const skippedMsg = d.skipped ? `, пропущено: ${d.skipped}` : '';
-    const projMsg    = d.project_name ? ` → «${d.project_name}»` : (d.project_id ? ' → проект' : '');
-    document.getElementById('import-result').textContent = `Додано нових: ${d.added}${linkedMsg}${skippedMsg}${projMsg}`;
+    const projMsg = d.project_name ? ` → «${d.project_name}»` : (d.project_id ? ' → проект' : '');
+    let txt = `Додано нових: ${d.added}`;
+    if (d.project_id) {
+      txt += d.keep_order
+        ? `, у проект: ${d.linked} позицій у порядку файлу (з повторами)`
+        : `, у проект: ${d.linked} унікальних (кількості підсумовано)`;
+    }
+    if (d.skipped) txt += `, пропущено: ${d.skipped}`;
+    document.getElementById('import-result').textContent = txt + projMsg;
     loadItems();
     loadItemsTab();
     await loadProjects();
@@ -1271,7 +1372,12 @@
       const items = await fetch(`/api/projects/${monitorProjectId}/items`).then(r => r.json());
       _setActiveQueue(Array.isArray(items) ? items : []);
       monitorDone = 0;
-      if (info) info.textContent = `${monitorQueue.length} матеріалів у порядку кошторису`;
+      if (info) {
+        const uniq = new Set(monitorQueue.map(i => i.id)).size;
+        info.textContent = uniq === monitorQueue.length
+          ? `${monitorQueue.length} матеріалів у порядку кошторису`
+          : `${monitorQueue.length} позицій (${uniq} унікальних — моніторинг без повторів) у порядку кошторису`;
+      }
     } catch (e) {
       if (info) info.textContent = 'Не вдалося завантажити проект';
     }
@@ -1728,7 +1834,10 @@
     const limit    = getBatchLimit();
     const parallel = getBatchParallel();
     const payload = {
-      item_ids: monitorQueue.map(i => i.id),
+      // Keep-order project queues may list the same item at several
+      // positions — monitoring always runs UNIQUE materials (first-
+      // occurrence order preserved by Set iteration).
+      item_ids: [...new Set(monitorQueue.map(i => i.id))],
       suppliers: activeSups,
       parallel_items: parallel,
     };

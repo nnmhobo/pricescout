@@ -40,10 +40,10 @@ PriceScout automatically searches 13 Ukrainian building-supply websites simultan
 
 1. Open the PriceScout folder.
 2. Double-click **`START.bat`**.
-3. A black console window will open. The first launch takes **5–10 minutes** — the app downloads all required components automatically. Do not close the window.
-4. When ready, your browser opens automatically at **http://localhost:5000**.
+3. An installation window will open. The first launch takes **5–10 minutes** — the app downloads all required components automatically and shows the progress. Do not close the window.
+4. When ready, your browser opens automatically at **http://localhost:8765**.
 
-> **To stop the app:** simply close the black console window.
+> **To stop the app:** press "Зупинити" in the PriceScout window, or simply close it.
 
 Every launch after the first takes just a few seconds.
 
@@ -189,14 +189,14 @@ Normal — downloading components and a browser engine takes 5–10 minutes depe
 **"Could not install dependencies"**
 Check your internet connection and run START.bat again. If the problem persists, delete the `.venv` folder inside the PriceScout folder and try again.
 
-**http://localhost:5000 doesn't open**
-Wait 10–15 seconds after the console says the app is starting, then open the address manually in your browser. Make sure the console window is still open.
+**http://localhost:8765 doesn't open**
+Wait 10–15 seconds after the window says the app is starting, then press "Відкрити у браузері" (or open the address manually). Make sure the PriceScout window is still open.
 
 **Prices not found / search not working**
 Delete the file `.venv\.setup_done` inside the PriceScout folder and run START.bat — this forces all scraping components to reinstall cleanly.
 
 **The search appears stuck**
-If the log stops updating for more than 5 minutes, close the console window, restart START.bat, and the UI will reconnect and confirm the run has ended.
+If the log stops updating for more than 5 minutes, close the PriceScout window, restart START.bat, and the UI will reconnect and confirm the run has ended.
 
 ---
 
@@ -205,7 +205,7 @@ If the log stops updating for more than 5 minutes, close the console window, res
 Create a `.env` file in the PriceScout folder to override defaults:
 
 ```
-PORT=5000                    # Web server port
+PORT=8765                    # Web server port
 MAX_PARALLEL_ITEMS=10        # Maximum items searched concurrently
 MAX_INNER_WORKERS=8          # Parallel supplier requests per item
 MAX_INNER_WORKERS_DISCOVERY=10

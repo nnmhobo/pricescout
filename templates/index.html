@@ -141,7 +141,38 @@
         <div class="panel-title">Історія експортів</div>
         <div class="panel-sub">Файли зберігаються у папці <code>exports/</code></div>
       </div>
-      <div id="exports-container"><div class="exports-empty">Завантаження…</div></div>
+
+      <!-- URL enrichment of an uploaded кошторис -->
+      <div style="padding:12px 16px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Додати посилання у кошторис</div>
+        <div style="font-size:12px;color:var(--ink2)">
+          Завантажте файл АВК-5 (.xls/.xlsx) — система додасть колонку з відомими посиланнями
+          (пошук за шифром, потім за назвою). Посилання беруться з результатів моніторингу.
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <input type="file" id="urls-file" accept=".xls,.xlsx"
+                 style="font-size:12px;font-family:var(--sans);max-width:260px">
+          <select id="urls-col-mode" onchange="document.getElementById('urls-col-letter').style.display = this.value==='custom' ? '' : 'none'"
+                  style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans)">
+            <option value="">Колонка: остання (авто)</option>
+            <option value="custom">Колонка: вказати…</option>
+          </select>
+          <input id="urls-col-letter" type="text" placeholder="напр. K" maxlength="3"
+                 style="display:none;width:70px;font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--mono)">
+          <select id="urls-dups"
+                  style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans)">
+            <option value="all">Повтори: заповнювати всі (1:1)</option>
+            <option value="first">Повтори: лише перший рядок</option>
+          </select>
+          <button class="btn-sel-all" onclick="runAddUrls()" id="urls-run-btn" style="font-size:12px;padding:7px 14px">→ Додати посилання</button>
+          <span id="urls-result" style="font-size:12px;color:var(--teal)"></span>
+        </div>
+      </div>
+
+      <!-- flex:1 + min-height:0 + overflow-y:auto — the list scrolls inside
+           the panel (which is overflow:hidden); the enrichment card above
+           stays fixed. -->
+      <div id="exports-container" style="flex:1;min-height:0;overflow-y:auto;padding-right:4px"><div class="exports-empty">Завантаження…</div></div>
     </div>
 
     <!-- Monitor -->
@@ -440,6 +471,8 @@
           <div class="import-stat"><div class="import-stat-val" id="imp-total">0</div><div class="import-stat-lbl">позицій</div></div>
           <div style="width:1px;height:16px;background:var(--border)"></div>
           <div class="import-stat"><div class="import-stat-val" id="imp-sel">0</div><div class="import-stat-lbl">вибрано</div></div>
+          <span id="imp-merged" style="display:none;font-size:11px;color:var(--ink3);margin-left:10px"
+                title="У кошторисі той самий матеріал зустрічається у кількох розділах робіт — кількості підсумовано в одну позицію"></span>
         </div>
       </div>
       </div>
@@ -475,17 +508,26 @@
         </div>
         <!-- Sticky import button at panel bottom -->
         <div style="padding-top:8px;border-top:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;gap:12px">
-          <button class="btn-import" id="btn-do-import" onclick="doImport()" disabled>
+          <button class="btn-import" id="btn-do-import" onclick="doImport(false)" disabled>
             ↓ Додати вибрані до бази матеріалів
           </button>
+          <div style="width:1px;height:28px;background:var(--border);align-self:center"></div>
           <div style="display:flex;flex-direction:column;gap:2px">
-            <span style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Прив'язати до проекту</span>
+            <span style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Проект</span>
             <select id="import-project-select" onchange="onImportProjectChange()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans);min-width:160px">
-              <option value="">— без проекту —</option>
+              <option value="">— оберіть проект —</option>
             </select>
           </div>
           <input id="import-new-project-name" type="text" placeholder="Назва нового проекту"
                  style="display:none;font-size:12px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans);min-width:200px;align-self:flex-end">
+          <label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;white-space:nowrap;align-self:flex-end;padding-bottom:6px"
+                 title="Увімкнено: проект зберігає КОЖЕН рядок файлу у вихідному порядку (повтори включно) — для колонки посилань 1:1 з кошторисом. Вимкнено: повтори об'єднуються, кількості підсумовуються.">
+            <input type="checkbox" id="import-keep-order" checked> зберегти порядок файлу (з повторами)
+          </label>
+          <button class="btn-import" id="btn-import-project" onclick="doImport(true)" disabled
+                  style="background:var(--gold)">
+            → Додати у проект
+          </button>
           <span id="import-result" style="font-size:12px;color:var(--teal)"></span>
         </div>
       </div>

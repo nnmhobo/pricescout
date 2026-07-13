@@ -26,7 +26,8 @@ pricescout/
 ├── app.py                  # Flask app + index route (no factory function; module-level `app`)
 ├── README.md               # User-facing readme, English (renamed from README_EN.md)
 ├── README_UA.md            # User-facing readme, Ukrainian
-├── START.bat               # Windows launcher (venv + deps + `scrapling install`)
+├── START.bat               # Silent launcher → `pythonw setup_gui.py` (console only if Python missing)
+├── setup_gui.py            # tkinter installer/launcher window — STDLIB ONLY (runs on system Python before the venv exists)
 ├── requirements.txt        # flask, scrapling[fetchers], lxml, xlrd, pandas, openpyxl, python-dotenv, rapidfuzz, requests
 ├── .env                    # (not committed) env overrides
 ├── pricescout.db           # SQLite database (WAL mode)
@@ -82,7 +83,7 @@ pricescout/
 │   ├── last_run.json       # Persisted results from most recent scrape run
 │   └── last_import.json    # Persisted last кошторис parse result
 │
-├── exports/                # Generated Excel files (served by /api/exports/<filename>)
+├── exports/                # Generated Excel files; monitoring/ = run exports + matrices, urls/ = URL-enriched кошториси, root = legacy
 ├── debug/                  # HTML snapshots dir (created at startup, dev aid)
 │
 ├── tests/                  # 10 test files, all pure-logic, no network (see §16)
@@ -260,9 +261,10 @@ All routes are Flask Blueprints registered in `app.py`. All return JSON unless n
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/export/excel` | Build Excel from current `state["results"]`; saves a copy to `exports/` and streams it. 400 if no results. |
-| GET | `/api/exports` | List saved exports: `[{filename, size_kb, created}]`. |
-| GET | `/api/exports/<filename>` | Download a saved export. |
-| DELETE | `/api/exports/<filename>` | Delete an export file. |
+| GET | `/api/exports` | List saved exports: `[{filename, type, size_kb, created}]`, newest first. `type` ∈ `monitoring` (runs + price matrices, saved in `exports/monitoring/`), `urls` (`exports/urls/`), `root` (legacy pre-split files). |
+| GET/DELETE | `/api/exports/<etype>/<filename>` | Typed download/delete (path-traversal-safe per subdir). |
+| GET/DELETE | `/api/exports/<filename>` | Legacy root-dir download/delete. |
+| POST | `/api/exports/add-urls` | **URL enrichment**: multipart `file` (.xls/.xlsx АВК-5) + form `column` (Excel letter; empty = append after last column) + `dups` (`all` = every repeat row gets the URL 1:1, `first` = only first occurrence). Rows matched by АВК code, fallback exact name; URL = cheapest supplier's product page (`_best_url_for_item`). .xlsx keeps formatting; .xls converted values-only. Saves to `exports/urls/`, returns `{filename, download, filled, rows, dup_skipped, not_found, converted_from_xls}`. |
 | GET | `/api/export/price-matrix` | All items × all suppliers matrix from DB `last_price` (+ min/max/spread columns, min-price cells highlighted). 400 if no availability data. |
 
 `_safe_export_path(filename)` strips characters, resolves inside `EXPORTS_DIR`, and rejects escapes — use it for any filename param.
@@ -271,7 +273,7 @@ All routes are Flask Blueprints registered in `app.py`. All return JSON unless n
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/kostoris/parse` | Multipart upload (`file`). Validates extension (`.xls`/`.xlsx`) and size (1 KB–20 MB), writes to a **temp file**, calls `parsers.kostoris_parser.parse(path)`. Returns `{total, retail, items, filename}` and saves it to `data/last_import.json`. Does NOT touch the DB. |
+| POST | `/api/kostoris/parse` | Multipart upload (`file`). Validates extension (`.xls`/`.xlsx`) and size (1 KB–20 MB), writes to a **temp file**, calls `parsers.kostoris_parser.parse(path)`. Returns `{total, rows_total, merged, retail, items, filename}` (total = unique materials; merged = repeat rows whose qty was summed) and saves it to `data/last_import.json`. Does NOT touch the DB. |
 | POST | `/api/kostoris/import` | Body: `{items: [ORDERED {name, code?, category?, qty?, unit?, unit_price?}], project_id? \| new_project_name?, filename?}` (legacy alt: `{names: [...]}`). `new_project_name` creates the project first (`filename` stored as `avk_file`). Bulk-inserts via `batch_add_items`: new items created, existing (by label) reused, ALL linked to the project with positions (sync-to-file). Returns `{added, linked, skipped, project_id, project_name}`. |
 | GET | `/api/kostoris/last` | Returns `data/last_import.json` content or `null`. |
 
@@ -288,7 +290,7 @@ All routes are Flask Blueprints registered in `app.py`. All return JSON unless n
 | POST | `/api/projects/<id>/items` | Body: `{item_id}` → junction insert. |
 | DELETE | `/api/projects/<id>/items/<item_id>` | Junction delete. |
 | GET | `/api/projects/<id>/summary` | `{project, item_count, items_with_price, total_estimate, total_best, saving, saving_pct}` |
-| GET | `/api/projects/<id>/export` | Excel export: estimate vs best-price comparison per item, one column per supplier. |
+| GET | `/api/projects/<id>/export` | Excel export in file order: estimate vs best-price comparison per item, one column per supplier, plus `Постачальник (мін.)` and `Посилання` (cheapest supplier's URL as plain text, empty when no price — customer copies this column against the source кошторис). |
 
 ---
 
@@ -473,7 +475,7 @@ Reads `.xls` via `xlrd` (manual cell copy → DataFrame) or `.xlsx` via `pandas.
 **Column layout (0-indexed):** col 1 = resource code, col 2 = name, col 3 = unit, col 4 = qty, col 6 = unit price.
 
 - `CODE_RE = re.compile(r'^[&+]?[СCКк\d][\dА-Яа-яA-Za-z]')` — row must look like a resource code; `варіант N` suffixes stripped.
-- Rows deduped by lowercased name (duplicates only logged to console).
+- Repeated materials (same lowercased name — АВК-5 lists a resource under every work section) are MERGED into one entry with quantities SUMMED (only when units match); `rows` field = number of merged source rows. Parse response exposes `rows_total`/`merged`; the UI shows "N рядків → M матеріалів" and an ×N badge on merged rows.
 - Categories derived from the numeric code prefix: К→Конструкції збірні; С111→Підлоги/покрівлі; С112→Пиломатеріали; С113→Трубопроводи; С114→Теплоізоляція; С121/С124→метал; С123→Вікна та двері; С130 (sub-code 62 → Вентиляція, else Теплопостачання); С151–152→Кабельні системи; equipment ranges 1100–1999 (опалення, вентиляція, сантехніка, електрика, КВП, крани…); С100-XXXX by sub-code; fallback `Матеріали будівельні`.
 - Each row → `{code, name, unit, qty, unit_price, retail, category}` where `retail = is_monitorable(name)` ⚠ (field is named `retail` in parse output but becomes `monitorable` after import).
 
@@ -563,7 +565,7 @@ Dark-mode filter-button fix (keep):
 
 | Variable | Default | Where used |
 |---|---|---|
-| `PORT` | `5000` | `app.py` |
+| `PORT` | `8765` | `app.py` + `setup_gui.py` (keep the two defaults in sync). ⚠ Was 5000 — changed because other Windows software constantly POSTs to localhost:5000 (405 log noise / port conflicts). |
 | `MAX_PARALLEL_ITEMS` | `10` | `runner.py` outer pool cap. `DEFAULT_PARALLEL_ITEMS = min(cap, 5)`. ⚠ `app.py`'s startup banner re-reads it with default `"5"` — display only. |
 | `MAX_INNER_WORKERS` | `8` | Suppliers per item in parallel |
 | `MAX_INNER_WORKERS_DISCOVERY` | `10` | Inner workers in discovery mode (items run sequentially) |
@@ -664,17 +666,25 @@ Run: `python -m pytest tests/ -v` — no network, pure logic.
 ## 17. Startup Sequence
 
 ```
-START.bat
-  → checks Python ≥3.10 on PATH
-  → creates .venv (first run)
-  → pip install -r requirements.txt + `scrapling install`
-    (fallback: python -m playwright install chromium) — once, marked by .venv\.setup_done
-  → opens http://localhost:5000 via PowerShell after 5 s
-  → python app.py
-      → load_dotenv()
-      → Flask(__name__) + register 5 blueprints
-      → AT IMPORT TIME: init_db() (tables + _migrate()), ensure_exports_dir(), ensure_debug_dir()
-      → app.run(debug=False, host="0.0.0.0", port=PORT, threaded=True)
+START.bat  (silent: only errors if Python itself is missing)
+  → start pythonw setup_gui.py
+setup_gui.py  (tkinter window, STDLIB ONLY — system Python, pre-venv)
+  → checks Python ≥3.10 (messagebox on failure)
+  → if http://localhost:PORT already answers → "вже запущено", open browser, exit setup path
+  → first run (.venv\.setup_done missing): venv → pip install uv → `python -m uv pip
+    install -r requirements.txt` (parallel downloads, ~5-10× faster; falls back to
+    plain pip on any uv failure) → scrapling.exe install (fallback: python -m
+    playwright install chromium) — with progress steps + collapsible log; marker
+    touched on success. Browser downloads remain the longest step (~hundreds of MB).
+  → Popen(.venv\Scripts\python.exe app.py, CREATE_NO_WINDOW), streams server output
+    into the log, waits for the HTTP endpoint (≤90 s), opens the browser
+  → window = server controller: «Відкрити у браузері» / «Зупинити»; closing the
+    window terminates the server process
+app.py
+  → load_dotenv()
+  → Flask(__name__) + register 5 blueprints
+  → AT IMPORT TIME: init_db() (tables + _migrate()), ensure_exports_dir(), ensure_debug_dir()
+  → app.run(debug=False, host="0.0.0.0", port=PORT, threaded=True)
 ```
 
-⚠ `init_db()` runs at module import (so WSGI servers get it too). ⚠ Binds `0.0.0.0` — LAN-exposed, no auth.
+⚠ `init_db()` runs at module import (so WSGI servers get it too). ⚠ Binds `0.0.0.0` — LAN-exposed, no auth. ⚠ `setup_gui.py` must stay stdlib-only — it executes before any dependency exists.

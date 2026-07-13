@@ -67,11 +67,14 @@ def kostoris_parse():
         items = parse_kostoris(str(tmp_path))
         if not items:
             return jsonify({"error": "Позиції не знайдено. Перевірте, що це Підсумкова відомість ресурсів АВК-5."}), 400
+        rows_total = sum(i.get("rows", 1) for i in items)
         result = {
-            "total":    len(items),
-            "retail":   sum(1 for i in items if i["retail"]),
-            "items":    items,
-            "filename": f.filename,
+            "total":      len(items),                 # unique materials
+            "rows_total": rows_total,                 # matched file rows (incl. repeats)
+            "merged":     rows_total - len(items),    # repeat rows merged (qty summed)
+            "retail":     sum(1 for i in items if i["retail"]),
+            "items":      items,
+            "filename":   f.filename,
         }
         save_last_import(result)
         return jsonify(result)
@@ -92,10 +95,15 @@ def kostoris_import():
       project_id:       link the selection to an existing project, OR
       new_project_name: create a project first and link to it
       filename:         stored as the project's avk_file (with new_project_name)
+      keep_order:       true → the project stores EVERY source row in file
+                        order (duplicates included, expanded from each item's
+                        `occurrences`) — 1:1 URL mapping against the file.
+                        false/absent → one row per material (qty summed).
     """
     payload    = request.json
     project_id = (payload.get("project_id") or "").strip() or None
     new_name   = (payload.get("new_project_name") or "").strip()
+    keep_order = bool(payload.get("keep_order"))
     raw        = payload.get("items") or [{"name": n} for n in payload.get("names", [])]
     if not raw:
         return jsonify({"error": "Немає вибраних позицій"}), 400
@@ -114,15 +122,19 @@ def kostoris_import():
             "qty":                 e.get("qty"),
             "unit":                e.get("unit"),
             "estimate_unit_price": e.get("unit_price"),
+            "occurrences":         e.get("occurrences"),
         }
         for e in raw if (e.get("name") or "").strip()
     ]
 
-    added, linked, skipped = batch_add_items(entries, project_id=project_id)
+    added, linked, skipped = batch_add_items(
+        entries, project_id=project_id, keep_duplicates=keep_order,
+    )
     return jsonify({
         "added":        added,
         "linked":       linked,
         "skipped":      skipped,
+        "keep_order":   keep_order,
         "project_id":   project_id,
         "project_name": project["name"] if project else None,
     })

@@ -1,6 +1,15 @@
 """PriceScout — Flask app factory."""
 import os
+import sys
 import time
+
+# Windows: when stdout is a pipe (GUI launcher) or a cp1252 console, printing
+# the Ukrainian banner/log lines would raise UnicodeEncodeError. Force UTF-8.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 from pathlib import Path
 from dotenv import load_dotenv
 from flask import Flask, render_template
@@ -55,7 +64,10 @@ def index():
 
 
 if __name__ == "__main__":
-    port     = int(os.getenv("PORT", 5000))
+    # Default port 8765: 5000 is contested on Windows — local agents of other
+    # software constantly POST to it (harmless 405 noise in our log) and can
+    # even occupy it. Override via PORT in .env.
+    port     = int(os.getenv("PORT", 8765))
     parallel = int(os.getenv("MAX_PARALLEL_ITEMS", "5"))
     print("=" * 52)
     print("  PriceScout — Моніторинг цін будматеріалів")
