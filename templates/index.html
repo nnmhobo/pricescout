@@ -141,6 +141,34 @@
         <div class="panel-title">Історія експортів</div>
         <div class="panel-sub">Файли зберігаються у папці <code>exports/</code></div>
       </div>
+
+      <!-- URL enrichment of an uploaded кошторис -->
+      <div style="padding:12px 16px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Додати посилання у кошторис</div>
+        <div style="font-size:12px;color:var(--ink2)">
+          Завантажте файл АВК-5 (.xls/.xlsx) — система додасть колонку з відомими посиланнями
+          (пошук за шифром, потім за назвою). Посилання беруться з результатів моніторингу.
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <input type="file" id="urls-file" accept=".xls,.xlsx"
+                 style="font-size:12px;font-family:var(--sans);max-width:260px">
+          <select id="urls-col-mode" onchange="document.getElementById('urls-col-letter').style.display = this.value==='custom' ? '' : 'none'"
+                  style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans)">
+            <option value="">Колонка: остання (авто)</option>
+            <option value="custom">Колонка: вказати…</option>
+          </select>
+          <input id="urls-col-letter" type="text" placeholder="напр. K" maxlength="3"
+                 style="display:none;width:70px;font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--mono)">
+          <select id="urls-dups"
+                  style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--white);font-family:var(--sans)">
+            <option value="all">Повтори: заповнювати всі (1:1)</option>
+            <option value="first">Повтори: лише перший рядок</option>
+          </select>
+          <button class="btn-sel-all" onclick="runAddUrls()" id="urls-run-btn" style="font-size:12px;padding:7px 14px">→ Додати посилання</button>
+          <span id="urls-result" style="font-size:12px;color:var(--teal)"></span>
+        </div>
+      </div>
+
       <div id="exports-container"><div class="exports-empty">Завантаження…</div></div>
     </div>
 

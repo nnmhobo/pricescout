@@ -751,28 +751,88 @@
   }
 
   // ── Exports ───────────────────────────────────────────────────
+  // Exports are grouped by origin: monitoring runs vs URL-enriched кошториси
+  // (legacy pre-split files are shown under monitoring).
+  function _exportsGroupHtml(title, files) {
+    if (!files.length) return '';
+    return `
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3);margin:10px 0 6px">${title}</div>
+      <div class="exports-table">
+        <div class="et-head"><span>Файл</span><span>Розмір</span><span>Дата</span><span></span></div>
+        ${files.map(f => `
+          <div class="et-row">
+            <div class="et-name"><a href="/api/exports/${esc(f.type)}/${encodeURIComponent(f.filename)}" download="${esc(f.filename)}">${esc(f.filename)}</a></div>
+            <div class="et-size">${f.size_kb} КБ</div>
+            <div class="et-date">${esc(f.created)}</div>
+            <div class="et-del"><button onclick="deleteExport('${esc(f.type)}','${esc(f.filename)}')" title="Видалити">×</button></div>
+          </div>`).join('')}
+      </div>`;
+  }
+
   function loadExports() {
     fetch('/api/exports').then(r => r.json()).then(files => {
       const el = document.getElementById('exports-container');
       if (!files.length) { el.innerHTML = '<div class="exports-empty">Немає збережених експортів</div>'; return; }
-      el.innerHTML = `
-        <div class="exports-table">
-          <div class="et-head"><span>Файл</span><span>Розмір</span><span>Дата</span><span></span></div>
-          ${files.map(f => `
-            <div class="et-row">
-              <div class="et-name"><a href="/api/exports/${esc(f.filename)}" download="${esc(f.filename)}">${esc(f.filename)}</a></div>
-              <div class="et-size">${f.size_kb} КБ</div>
-              <div class="et-date">${esc(f.created)}</div>
-              <div class="et-del"><button onclick="deleteExport('${esc(f.filename)}')" title="Видалити">×</button></div>
-            </div>`).join('')}
-        </div>`;
+      const urls = files.filter(f => f.type === 'urls');
+      const monitoring = files.filter(f => f.type !== 'urls');
+      el.innerHTML =
+        _exportsGroupHtml('Моніторинг', monitoring) +
+        _exportsGroupHtml('Кошториси з посиланнями', urls);
     });
   }
 
-  function deleteExport(filename) {
+  function deleteExport(etype, filename) {
     if (!confirm(`Видалити ${filename}?`)) return;
-    fetch(`/api/exports/${encodeURIComponent(filename)}`, {method:'DELETE'})
+    fetch(`/api/exports/${encodeURIComponent(etype)}/${encodeURIComponent(filename)}`, {method:'DELETE'})
       .then(() => loadExports());
+  }
+
+  // ── URL enrichment of an uploaded кошторис ────────────────────
+  async function runAddUrls() {
+    const inp = document.getElementById('urls-file');
+    const res = document.getElementById('urls-result');
+    const btn = document.getElementById('urls-run-btn');
+    if (!inp || !inp.files || !inp.files.length) {
+      if (res) { res.style.color = 'var(--danger)'; res.textContent = 'Оберіть файл .xls/.xlsx'; }
+      return;
+    }
+    const fd = new FormData();
+    fd.append('file', inp.files[0]);
+    const colMode = document.getElementById('urls-col-mode')?.value || '';
+    if (colMode === 'custom') {
+      const letter = (document.getElementById('urls-col-letter')?.value || '').trim();
+      if (!/^[A-Za-z]{1,3}$/.test(letter)) {
+        if (res) { res.style.color = 'var(--danger)'; res.textContent = 'Вкажіть колонку літерою, напр. K'; }
+        return;
+      }
+      fd.append('column', letter);
+    }
+    fd.append('dups', document.getElementById('urls-dups')?.value || 'all');
+
+    if (btn) btn.disabled = true;
+    if (res) { res.style.color = 'var(--ink3)'; res.textContent = 'Обробляємо…'; }
+    try {
+      const d = await fetch('/api/exports/add-urls', { method: 'POST', body: fd }).then(r => r.json());
+      if (d.error) {
+        if (res) { res.style.color = 'var(--danger)'; res.textContent = '⚠ ' + d.error; }
+        return;
+      }
+      const dupNote  = d.dup_skipped ? `, пропущено повторів: ${d.dup_skipped}` : '';
+      const convNote = d.converted_from_xls ? ' (перетворено у .xlsx)' : '';
+      if (res) {
+        res.style.color = 'var(--teal)';
+        res.textContent = `✓ Посилань додано: ${d.filled} з ${d.rows} позицій${dupNote}${convNote}`;
+      }
+      // Auto-download the produced file + refresh the list.
+      const a = document.createElement('a');
+      a.href = d.download; a.download = d.filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      loadExports();
+    } catch (e) {
+      if (res) { res.style.color = 'var(--danger)'; res.textContent = 'Помилка: ' + e; }
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   // ── Helpers ───────────────────────────────────────────────────

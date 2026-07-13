@@ -83,7 +83,7 @@ pricescout/
 │   ├── last_run.json       # Persisted results from most recent scrape run
 │   └── last_import.json    # Persisted last кошторис parse result
 │
-├── exports/                # Generated Excel files (served by /api/exports/<filename>)
+├── exports/                # Generated Excel files; monitoring/ = run exports + matrices, urls/ = URL-enriched кошториси, root = legacy
 ├── debug/                  # HTML snapshots dir (created at startup, dev aid)
 │
 ├── tests/                  # 10 test files, all pure-logic, no network (see §16)
@@ -261,9 +261,10 @@ All routes are Flask Blueprints registered in `app.py`. All return JSON unless n
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/export/excel` | Build Excel from current `state["results"]`; saves a copy to `exports/` and streams it. 400 if no results. |
-| GET | `/api/exports` | List saved exports: `[{filename, size_kb, created}]`. |
-| GET | `/api/exports/<filename>` | Download a saved export. |
-| DELETE | `/api/exports/<filename>` | Delete an export file. |
+| GET | `/api/exports` | List saved exports: `[{filename, type, size_kb, created}]`, newest first. `type` ∈ `monitoring` (runs + price matrices, saved in `exports/monitoring/`), `urls` (`exports/urls/`), `root` (legacy pre-split files). |
+| GET/DELETE | `/api/exports/<etype>/<filename>` | Typed download/delete (path-traversal-safe per subdir). |
+| GET/DELETE | `/api/exports/<filename>` | Legacy root-dir download/delete. |
+| POST | `/api/exports/add-urls` | **URL enrichment**: multipart `file` (.xls/.xlsx АВК-5) + form `column` (Excel letter; empty = append after last column) + `dups` (`all` = every repeat row gets the URL 1:1, `first` = only first occurrence). Rows matched by АВК code, fallback exact name; URL = cheapest supplier's product page (`_best_url_for_item`). .xlsx keeps formatting; .xls converted values-only. Saves to `exports/urls/`, returns `{filename, download, filled, rows, dup_skipped, not_found, converted_from_xls}`. |
 | GET | `/api/export/price-matrix` | All items × all suppliers matrix from DB `last_price` (+ min/max/spread columns, min-price cells highlighted). 400 if no availability data. |
 
 `_safe_export_path(filename)` strips characters, resolves inside `EXPORTS_DIR`, and rejects escapes — use it for any filename param.
