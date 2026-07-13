@@ -95,15 +95,32 @@ class LauncherApp:
     def _build_ui(self):
         r = self.root
         r.title("PriceScout")
-        r.geometry("560x300")
-        r.minsize(520, 260)
+        r.geometry("560x340")
+        r.minsize(520, 300)
         r.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        head = ttk.Frame(r, padding=(16, 12, 16, 4))
+        # Header — mirrors the app's top-left brand block (dark strip, gold
+        # "PS" box, serif name). The logo is drawn on a Canvas: the web app's
+        # logo is pure CSS, there is no image asset to load (and this file
+        # must stay stdlib-only anyway).
+        INK, GOLD = "#141820", "#b5924c"
+        head = tk.Frame(r, bg=INK)
         head.pack(fill="x")
-        ttk.Label(head, text="PriceScout", font=("Georgia", 18, "bold")).pack(anchor="w")
-        ttk.Label(head, text="Моніторинг цін будматеріалів",
-                  foreground="#777").pack(anchor="w")
+        brand = tk.Frame(head, bg=INK)
+        brand.pack(anchor="w", padx=16, pady=10)
+        logo = tk.Canvas(brand, width=38, height=38, bg=INK,
+                         highlightthickness=0, bd=0)
+        logo.create_rectangle(3, 3, 35, 35, outline=GOLD, width=2)
+        logo.create_text(19, 19, text="PS", fill=GOLD, font=("Georgia", 12))
+        logo.pack(side="left", padx=(0, 10))
+        names = tk.Frame(brand, bg=INK)
+        names.pack(side="left")
+        tk.Label(names, text="PriceScout", bg=INK, fg="#ffffff",
+                 font=("Georgia", 14)).pack(anchor="w")
+        tk.Label(names, text="МОНІТОРИНГ ЦІН БУДМАТЕРІАЛІВ", bg=INK,
+                 fg="#6b7078", font=("Segoe UI", 7)).pack(anchor="w")
+        # thin gold underline, like the header's gradient rule in the app
+        tk.Frame(r, bg=GOLD, height=1).pack(fill="x")
 
         body = ttk.Frame(r, padding=(16, 8))
         body.pack(fill="both", expand=True)
@@ -145,11 +162,11 @@ class LauncherApp:
     def toggle_log(self):
         if self.log_visible:
             self.log_frame.pack_forget()
-            self.root.geometry("560x300")
+            self.root.geometry("560x340")
             self.btn_log.configure(text="Детальніше ▾")
         else:
             self.log_frame.pack(fill="both", expand=True)
-            self.root.geometry("560x460")
+            self.root.geometry("560x500")
             self.btn_log.configure(text="Згорнути ▴")
         self.log_visible = not self.log_visible
 
