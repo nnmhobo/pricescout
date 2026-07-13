@@ -189,7 +189,9 @@ class LauncherApp:
         self.progress.pack(fill="x", pady=(10, 4))
 
         self.status = ttk.Label(body, text="Підготовка…")
-        self.status.pack(anchor="w")
+        # Top padding keeps the status line visually separated from the step
+        # list even after the progress bar is hidden on launch.
+        self.status.pack(anchor="w", pady=(10, 0))
 
         btns = ttk.Frame(r, padding=(16, 4, 16, 6))
         btns.pack(fill="x")
