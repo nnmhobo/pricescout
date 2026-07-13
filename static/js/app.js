@@ -370,6 +370,7 @@
     importFilename = d.filename || '';
     selectedNames = new Set(d.items.map(i => i.name));
     document.getElementById('imp-total').textContent  = d.total;
+    _showMergedNote(d);
     document.getElementById('imp-sel').textContent    = selectedNames.size;
     document.getElementById('import-stats-row').style.display = '';
     document.getElementById('import-table-wrap').style.display = 'flex';
@@ -801,6 +802,21 @@
     if (f) parseKostoris(f);
   }
 
+  // "544 рядків → 487 матеріалів (57 повторів об'єднано)" note — the same
+  // material appears under several work sections in АВК-5 files; the parser
+  // merges them and SUMS the quantities.
+  function _showMergedNote(d) {
+    const mrg = document.getElementById('imp-merged');
+    if (!mrg) return;
+    if (d && d.merged > 0) {
+      mrg.textContent = `${d.rows_total} рядків у файлі → ${d.total} матеріалів ` +
+                        `(${d.merged} повторів об'єднано, кількості підсумовано)`;
+      mrg.style.display = '';
+    } else {
+      mrg.style.display = 'none';
+    }
+  }
+
   function parseKostoris(file) {
     if (!file) return;
     const drop = document.getElementById('import-drop');
@@ -821,6 +837,7 @@
         importFilename = file.name;
         selectedNames = new Set(importItems.map(i => i.name));
         document.getElementById('imp-total').textContent = d.total;
+        _showMergedNote(d);
         document.getElementById('import-stats-row').style.display = '';
         document.getElementById('import-table-wrap').style.display = 'flex';
         drop.querySelector('.import-drop-txt').textContent = '✓ ' + file.name;
@@ -887,7 +904,7 @@
         <td>${esc(i.name)}</td>
         <td style="font-family:var(--mono);font-size:10px;color:var(--ink3)">${esc(i.code)}</td>
         <td style="font-family:var(--mono);font-size:11px">${esc(i.unit||'')}</td>
-        <td style="font-family:var(--mono);font-size:11px">${i.qty||''}</td>
+        <td style="font-family:var(--mono);font-size:11px">${i.qty||''}${i.rows > 1 ? ` <span style="font-size:9px;padding:0 4px;background:var(--paper2);color:var(--ink3);border-radius:3px" title="Кількість підсумовано з ${i.rows} рядків файлу">×${i.rows}</span>` : ''}</td>
         <td style="font-family:var(--mono);font-size:11px">${i.unit_price ? Number(i.unit_price).toLocaleString('uk-UA') + ' ₴' : '—'}</td>
         <td><span style="display:inline-block;padding:1px 5px;background:var(--paper2);color:var(--ink3);border-radius:3px;font-size:9px">${esc(i.category)}</span></td>
       </tr>`).join('');

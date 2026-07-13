@@ -272,7 +272,7 @@ All routes are Flask Blueprints registered in `app.py`. All return JSON unless n
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/kostoris/parse` | Multipart upload (`file`). Validates extension (`.xls`/`.xlsx`) and size (1 KB–20 MB), writes to a **temp file**, calls `parsers.kostoris_parser.parse(path)`. Returns `{total, retail, items, filename}` and saves it to `data/last_import.json`. Does NOT touch the DB. |
+| POST | `/api/kostoris/parse` | Multipart upload (`file`). Validates extension (`.xls`/`.xlsx`) and size (1 KB–20 MB), writes to a **temp file**, calls `parsers.kostoris_parser.parse(path)`. Returns `{total, rows_total, merged, retail, items, filename}` (total = unique materials; merged = repeat rows whose qty was summed) and saves it to `data/last_import.json`. Does NOT touch the DB. |
 | POST | `/api/kostoris/import` | Body: `{items: [ORDERED {name, code?, category?, qty?, unit?, unit_price?}], project_id? \| new_project_name?, filename?}` (legacy alt: `{names: [...]}`). `new_project_name` creates the project first (`filename` stored as `avk_file`). Bulk-inserts via `batch_add_items`: new items created, existing (by label) reused, ALL linked to the project with positions (sync-to-file). Returns `{added, linked, skipped, project_id, project_name}`. |
 | GET | `/api/kostoris/last` | Returns `data/last_import.json` content or `null`. |
 
@@ -474,7 +474,7 @@ Reads `.xls` via `xlrd` (manual cell copy → DataFrame) or `.xlsx` via `pandas.
 **Column layout (0-indexed):** col 1 = resource code, col 2 = name, col 3 = unit, col 4 = qty, col 6 = unit price.
 
 - `CODE_RE = re.compile(r'^[&+]?[СCКк\d][\dА-Яа-яA-Za-z]')` — row must look like a resource code; `варіант N` suffixes stripped.
-- Rows deduped by lowercased name (duplicates only logged to console).
+- Repeated materials (same lowercased name — АВК-5 lists a resource under every work section) are MERGED into one entry with quantities SUMMED (only when units match); `rows` field = number of merged source rows. Parse response exposes `rows_total`/`merged`; the UI shows "N рядків → M матеріалів" and an ×N badge on merged rows.
 - Categories derived from the numeric code prefix: К→Конструкції збірні; С111→Підлоги/покрівлі; С112→Пиломатеріали; С113→Трубопроводи; С114→Теплоізоляція; С121/С124→метал; С123→Вікна та двері; С130 (sub-code 62 → Вентиляція, else Теплопостачання); С151–152→Кабельні системи; equipment ranges 1100–1999 (опалення, вентиляція, сантехніка, електрика, КВП, крани…); С100-XXXX by sub-code; fallback `Матеріали будівельні`.
 - Each row → `{code, name, unit, qty, unit_price, retail, category}` where `retail = is_monitorable(name)` ⚠ (field is named `retail` in parse output but becomes `monitorable` after import).
 

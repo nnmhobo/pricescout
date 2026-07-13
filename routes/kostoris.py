@@ -67,11 +67,14 @@ def kostoris_parse():
         items = parse_kostoris(str(tmp_path))
         if not items:
             return jsonify({"error": "Позиції не знайдено. Перевірте, що це Підсумкова відомість ресурсів АВК-5."}), 400
+        rows_total = sum(i.get("rows", 1) for i in items)
         result = {
-            "total":    len(items),
-            "retail":   sum(1 for i in items if i["retail"]),
-            "items":    items,
-            "filename": f.filename,
+            "total":      len(items),                 # unique materials
+            "rows_total": rows_total,                 # matched file rows (incl. repeats)
+            "merged":     rows_total - len(items),    # repeat rows merged (qty summed)
+            "retail":     sum(1 for i in items if i["retail"]),
+            "items":      items,
+            "filename":   f.filename,
         }
         save_last_import(result)
         return jsonify(result)

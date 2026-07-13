@@ -16,9 +16,9 @@ CODE_RE = re.compile(r'^[&+]?[СCКк\d][\dА-Яа-яA-Za-z]')
 
 
 def _parse_df(df: pd.DataFrame) -> list[dict]:
-    items = []
-    seen  = set()
-    duplicates = []
+    items: list[dict] = []
+    by_key: dict[str, dict] = {}
+    merged_rows = 0
 
     for _, row in df.iterrows():
         code_raw  = str(row[1]) if pd.notna(row[1]) else ''
@@ -35,12 +35,6 @@ def _parse_df(df: pd.DataFrame) -> list[dict]:
         if not CODE_RE.match(code) or not name or name == 'nan':
             continue
 
-        key = name.lower()
-        if key in seen:
-            duplicates.append(name)
-            continue
-        seen.add(key)
-
         unit_price = None
         raw_price = price_raw.split('\n')[0].replace(',', '.').replace('\xa0', '').replace(' ', '').strip()
         try:
@@ -53,6 +47,21 @@ def _parse_df(df: pd.DataFrame) -> list[dict]:
             qty = float(qty_raw.replace(',', '.').strip())
         except Exception:
             pass
+
+        key = name.lower()
+        existing = by_key.get(key)
+        if existing is not None:
+            # Same material on another row of the file — typical АВК-5
+            # output: the resource is listed under EVERY work section it is
+            # used in, each with its own quantity. Merge into one entry and
+            # SUM the quantities (when units match), so project totals are
+            # correct. `rows` counts the merged source rows for the UI.
+            merged_rows += 1
+            existing['rows'] += 1
+            if qty is not None and \
+               (existing.get('unit') or '').strip().lower() == unit.strip().lower():
+                existing['qty'] = round((existing.get('qty') or 0) + qty, 6)
+            continue
 
         # determine category from ДБН code prefix
         code_clean = code.lstrip('&+').strip()
@@ -158,7 +167,7 @@ def _parse_df(df: pd.DataFrame) -> list[dict]:
             category = 'Матеріали будівельні'
 
         is_retail = is_monitorable(name)
-        items.append({
+        item = {
             'code':       code,
             'name':       name,
             'unit':       unit,
@@ -166,14 +175,13 @@ def _parse_df(df: pd.DataFrame) -> list[dict]:
             'unit_price': unit_price,
             'retail':     is_retail,
             'category':   category,
-        })
+            'rows':       1,   # how many file rows were merged into this entry
+        }
+        items.append(item)
+        by_key[key] = item
 
     # silent in production — summary only to console
-    print(f"Кошторис: {len(items)} унікальних позицій ({len(duplicates)} дублікатів)")
-    if duplicates:
-        print(f"\nДублікати ({len(duplicates)}):")
-        for d in duplicates:
-            print(f"  - {d[:80]}")
+    print(f"Кошторис: {len(items)} унікальних позицій ({merged_rows} рядків-повторів об'єднано)")
     return items
 
 
