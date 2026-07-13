@@ -670,9 +670,11 @@ START.bat  (silent: only errors if Python itself is missing)
 setup_gui.py  (tkinter window, STDLIB ONLY — system Python, pre-venv)
   → checks Python ≥3.10 (messagebox on failure)
   → if http://localhost:PORT already answers → "вже запущено", open browser, exit setup path
-  → first run (.venv\.setup_done missing): venv → pip install -r requirements.txt
-    → scrapling.exe install (fallback: python -m playwright install chromium) — with
-    progress steps + collapsible log; marker touched on success
+  → first run (.venv\.setup_done missing): venv → pip install uv → `python -m uv pip
+    install -r requirements.txt` (parallel downloads, ~5-10× faster; falls back to
+    plain pip on any uv failure) → scrapling.exe install (fallback: python -m
+    playwright install chromium) — with progress steps + collapsible log; marker
+    touched on success. Browser downloads remain the longest step (~hundreds of MB).
   → Popen(.venv\Scripts\python.exe app.py, CREATE_NO_WINDOW), streams server output
     into the log, waits for the HTTP endpoint (≤90 s), opens the browser
   → window = server controller: «Відкрити у браузері» / «Зупинити»; closing the

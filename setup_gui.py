@@ -38,7 +38,14 @@ CREATE_NO_WINDOW = 0x08000000
 # encodes their stdout with the locale codepage (cp1252) and app.py's
 # Ukrainian startup banner crashes with UnicodeEncodeError. Forcing UTF-8
 # also makes unspecified open() calls inside the app behave sanely.
-CHILD_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+CHILD_ENV = {
+    **os.environ,
+    "PYTHONIOENCODING": "utf-8",
+    "PYTHONUTF8": "1",
+    # pip niceties: no "new version available" banner, never prompt.
+    "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+    "PIP_NO_INPUT": "1",
+}
 
 MAX_LOG_LINES = 2000
 
@@ -236,9 +243,24 @@ class LauncherApp:
         if first_run:
             self.mark_step(1, "run")
             self.set_status("Встановлюємо компоненти (одноразово, кілька хвилин)…")
-            self._run([str(VENV_PY), "-m", "pip", "install", "--upgrade", "pip"], "pip")
-            if self._run([str(VENV_PY), "-m", "pip", "install", "-r", "requirements.txt"],
-                         self.STEPS[1]) != 0:
+            # `uv` downloads packages in parallel — several times faster than
+            # plain pip on this dependency set (pandas/numpy/lxml/scrapling).
+            # The venv's bundled pip is used only to bootstrap uv; if uv
+            # can't be installed or fails, fall back to plain pip so setup
+            # never becomes LESS reliable, only faster.
+            deps_rc = 1
+            if self._run([str(VENV_PY), "-m", "pip", "install", "--quiet", "uv"],
+                         "uv (прискорювач встановлення)") == 0:
+                deps_rc = self._run(
+                    [str(VENV_PY), "-m", "uv", "pip", "install",
+                     "--python", str(VENV_PY), "-r", "requirements.txt"],
+                    self.STEPS[1])
+            if deps_rc != 0:
+                self.log("uv недоступний — встановлюємо через звичайний pip…")
+                deps_rc = self._run(
+                    [str(VENV_PY), "-m", "pip", "install", "-r", "requirements.txt"],
+                    self.STEPS[1])
+            if deps_rc != 0:
                 self._fail("Не вдалося встановити компоненти. Перевірте інтернет і запустіть ще раз.")
                 return
             self.mark_step(1, "ok")
