@@ -289,7 +289,7 @@ All routes are Flask Blueprints registered in `app.py`. All return JSON unless n
 | POST | `/api/projects/<id>/items` | Body: `{item_id}` → junction insert. |
 | DELETE | `/api/projects/<id>/items/<item_id>` | Junction delete. |
 | GET | `/api/projects/<id>/summary` | `{project, item_count, items_with_price, total_estimate, total_best, saving, saving_pct}` |
-| GET | `/api/projects/<id>/export` | Excel export: estimate vs best-price comparison per item, one column per supplier. |
+| GET | `/api/projects/<id>/export` | Excel export in file order: estimate vs best-price comparison per item, one column per supplier, plus `Постачальник (мін.)` and `Посилання` (cheapest supplier's URL as plain text, empty when no price — customer copies this column against the source кошторис). |
 
 ---
 

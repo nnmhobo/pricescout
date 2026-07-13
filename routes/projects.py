@@ -167,7 +167,14 @@ def export_project(project_id):
                 row[sup_names.get(sid, sid)] = entry["last_price"]
             else:
                 row[sup_names.get(sid, sid)] = None
-        row["Мін. ціна ₴"]   = item.get("best_price")
+        # URL of the cheapest supplier's product page — may be empty when no
+        # price was found. Plain text (not a hyperlink) so the column can be
+        # copied 1:1 next to the original кошторис.
+        best_sid = item.get("best_supplier")
+        best_entry = sups.get(best_sid) if best_sid else None
+        row["Мін. ціна ₴"]        = item.get("best_price")
+        row["Постачальник (мін.)"] = (sup_names.get(best_sid, best_sid) if best_sid else "")
+        row["Посилання"]           = (best_entry.get("url") if best_entry else "") or ""
         row["Сума мін. ₴"]   = item.get("total_best")
         row["Економія %"]     = item.get("saving_pct")
         rows.append(row)
