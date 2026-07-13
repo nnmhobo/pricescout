@@ -49,6 +49,53 @@ CHILD_ENV = {
 
 MAX_LOG_LINES = 2000
 
+# Window icon — the app's "PS" brand mark (gold box on ink) pre-rendered as
+# tiny PNGs and embedded base64, so the launcher stays a single stdlib-only
+# file with no image assets. Without this, Windows shows the default Tcl/Tk
+# feather icon in the title bar and taskbar.
+ICON_16 = (
+    "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABA0lEQVR42mPcOsnnPwMFgIWBgYEh"
+    "vu0KWZoXVukwMDFQCAbeABZkTm6QHIOJBh8DAwMDw6/f/xgOXfrAsP/8O4bsAFkGSWF2BkZGBoZJ"
+    "ax4xnL31CbsLpm14zMDAAFG0//x7BhdjIQZTDT6G+y++M6R1X2NYvOs5cV7IC5FjcDQUZNh9+i3D"
+    "vrPvGH79/scQ6y7JICfOwfDgxXfcXoCB/lUPGS7c+czAwMDA4GkuwnDh9meGqw++MMS6SzF4W4oy"
+    "LNr5DLsLsgJkGRgYGBgKw+QZRPjZ4OKFYfIMs0u1GbTkuRlO3/iI2wWT1z3CcM32k28Ytp98M4jT"
+    "wSBJiQurdMg2AACiMk2XQ3VYZgAAAABJRU5ErkJggg=="
+)
+ICON_32 = (
+    "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACaklEQVR42u2XXUiTURzGf/vwnZtO"
+    "nVO2UZqGoqGUwVghEVKIEXQhUUJdGN0ESRfRRSVdSxeFFBUJXeRdUlCIN0VWN0opmoE4cwathbr2"
+    "7VzbXp1vF+r6YFFq9hbsf/f+Dy/nx/Oc85xzFAXmEgkZSw3Q2Voty+TNbaMokbnUPxL9jfpWcdkV"
+    "SAOkAf6tbbhSNWV6zh7dkvKHSDTBlC/Ok0EfA/ZQsm+tyKHBVoDFqCFDrcAbFHk3FeXlWBC7M4Ik"
+    "rUKBkckwzW2jBMLzAMxFE5xoG+VChwN3QKR8s46WxiIabEYAGmxGzhwuZsYf59IdBy3tdm48dKHJ"
+    "UHL+WCkVxVnrt0ACpn1x7r9wJ3t1NfkAHNhVAEDvkJ/g3AILCYlpX5zb3S68IfHPrgGF4nsogNys"
+    "JScP1RZiMghfxyU4d3OCcWdkdWsg5cSA2ajhSJ0p2Xs+7AfgU0DEYtRgrczBWpmDJyhid0YYmQzz"
+    "ZjLMQkJaH0C2VsXd5fyOxBI4Pn7m8YCXwfFZALqezXC6sQhBvSRoYZ5AYZ7A3h0G3H6Rq13vcQfE"
+    "tQPMRRO0tNt/Ov7aEeZih4Pa6jxqyvSUWLSolEtemfIFmvabuf7gw/os+FV5Q/N093no7vOQKSip"
+    "Ks2maZ8Zk0Fgq0W7sUF0+VQ5O8v1ye+YuMjQ21l6h3wAROOLG5+EJw9uwrYtF71OhVqloNiUyZ7t"
+    "BgCeLoOsOQmztSo6W6sZnpjlWgovr9xzsrsql3qrkeP1FvQ6FTFxEZc7xq1HLl6NhVYHsJKEv++/"
+    "SE+/h55+T/o0TAOkAf7zK5kcb0TZFVDI/Tz/ArPb14k4K1U4AAAAAElFTkSuQmCC"
+)
+ICON_48 = (
+    "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAADoElEQVR42u2aX0xbVRzHP3ft6PqH"
+    "3rCCdOsoReboBhrdxiAmxmiIZtEXk7n5ps/6sGzxCY1PRt/UmPCivkxjYlzMEhPjyJxh/omC3cbU"
+    "SXEwS6VS1tJCy720t7f3+gDrLBQEpR1N7vfl5p5z7rn3c87vz/klV6h3+3SqWGaAM70dVfnxz7/x"
+    "K9uoclU9gLnUtmxlLTd3w4QMAAPAADAADAADYEsdJZar79R+HFbTmmN0IJPViCayXBtPc/FygpSk"
+    "rnyZSeCRB+o47HfSdM8OHFYTSk4nLaukZZXJWJYbkzJjEZmpmezmALz09ggAr73QSutua6H9y8E4"
+    "n1yMItrNPNHp4umHG2jZZaVll5WeQy7e/SzMaFgqjN/p3M7Lz/nw1FsYmZDoO/cnk7cy5FQd0WHm"
+    "gM/OU90NPPpgHQCvvD/GZCxTfhOak1TODkzzw/XZQpvDauLUs15E++L6CAKcPObFU29BUTXe+nSC"
+    "0bCElMmjqBqxWYVLw0le/+gm8Tnl7vjAhZ9miu6tFlNhNdua7Pjci7s3L+dRclrJOVKSyoVAYnN9"
+    "YL2aSqxcOW+jdem6o8iUDu5zcuX3VMl5zg/GOT8YrzyAIJRwbn2x3NaWVd0nj3kJhiUCwRTXQ/P8"
+    "Fc+WLwqtV7tdlhVtE9OLThgtEVH8Xjt+r73gRyMhieHxNJeDKRRVqzzAk0fqi+7lTJ5vriUB+C0k"
+    "EYll8TRYSj4r2s10t4t0t4uke1Q+7J9iaGSuMk4s2s2ceNxNp99ZaJtfyPPO2XAhF2i6Tt+58LpM"
+    "pdZm5sVnmjjc5izvDhztqudo151VzyhLiWwszVclElkknuXVD8Z4aF8tXftF2n0O7KskSAE4/pib"
+    "wGiqfAC3E9lGlNd0AsEUgWAKQYDmRivtPjsH25zs9diKxjburMHl3M5MKlcZH9iodB1C0QVC0QW+"
+    "+DFOq8fG6ePNRccW0WH+V4CKHOZaPTbO9HZwaA27Ho/I9A8Vx/+MopXfiTeiI35xzf60nC+KYtMJ"
+    "ZWsBdB0Q6WhxrNp//713+vqHZshrevmc+L9m69Mnmrk0nOTbn5PcSirkVJ3Guhp6Ol0FExu4muDz"
+    "72PlrQf+GUbf/PgPghPSqnPcjMj0vneD+/bY2LvHRrPbSkeLg1qbCUvNNrKKRmwux9dXEnz3yyzj"
+    "EXnzMvHteuB/RZylPBCJZxkYTholpQFgABgABoABYAAYAFtFK85C1fbbgWFCd1tCtf9u8zewdF+x"
+    "PYYEYgAAAABJRU5ErkJggg=="
+)
+
 
 def read_port() -> int:
     """PORT from .env (manual parse — python-dotenv isn't installed yet)."""
@@ -95,6 +142,13 @@ class LauncherApp:
     def _build_ui(self):
         r = self.root
         r.title("PriceScout")
+        # Replace the default Tcl/Tk feather icon with the PS brand mark.
+        # References are kept on self — Tk drops images that get GC'd.
+        try:
+            self._icons = [tk.PhotoImage(data=d) for d in (ICON_48, ICON_32, ICON_16)]
+            r.iconphoto(True, *self._icons)
+        except Exception:
+            pass
         r.geometry("560x340")
         r.minsize(520, 300)
         r.protocol("WM_DELETE_WINDOW", self.on_close)
