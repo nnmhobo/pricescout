@@ -564,7 +564,7 @@ Dark-mode filter-button fix (keep):
 
 | Variable | Default | Where used |
 |---|---|---|
-| `PORT` | `5000` | `app.py` |
+| `PORT` | `8765` | `app.py` + `setup_gui.py` (keep the two defaults in sync). ⚠ Was 5000 — changed because other Windows software constantly POSTs to localhost:5000 (405 log noise / port conflicts). |
 | `MAX_PARALLEL_ITEMS` | `10` | `runner.py` outer pool cap. `DEFAULT_PARALLEL_ITEMS = min(cap, 5)`. ⚠ `app.py`'s startup banner re-reads it with default `"5"` — display only. |
 | `MAX_INNER_WORKERS` | `8` | Suppliers per item in parallel |
 | `MAX_INNER_WORKERS_DISCOVERY` | `10` | Inner workers in discovery mode (items run sequentially) |

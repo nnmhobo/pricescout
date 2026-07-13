@@ -64,7 +64,10 @@ def index():
 
 
 if __name__ == "__main__":
-    port     = int(os.getenv("PORT", 5000))
+    # Default port 8765: 5000 is contested on Windows — local agents of other
+    # software constantly POST to it (harmless 405 noise in our log) and can
+    # even occupy it. Override via PORT in .env.
+    port     = int(os.getenv("PORT", 8765))
     parallel = int(os.getenv("MAX_PARALLEL_ITEMS", "5"))
     print("=" * 52)
     print("  PriceScout — Моніторинг цін будматеріалів")

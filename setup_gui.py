@@ -54,7 +54,7 @@ def read_port() -> int:
                     return int(line.split("=", 1)[1].strip())
         except Exception:
             pass
-    return 5000
+    return 8765   # must match app.py's default (5000 is contested on Windows)
 
 
 PORT = read_port()
