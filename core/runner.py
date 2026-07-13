@@ -520,9 +520,13 @@ def _run_batch(
     if project_id:
         try:
             from core.item_db import get_project_items
+            # Keep-order projects may list the same item at several positions
+            # (one per source row) — SUM the row quantities so the item's
+            # total in the results reflects the whole project.
             for pi in get_project_items(project_id):
                 if pi.get("qty") is not None:
-                    qty_overrides[pi["id"]] = pi["qty"]
+                    qty_overrides[pi["id"]] = round(
+                        qty_overrides.get(pi["id"], 0) + pi["qty"], 6)
         except Exception as exc:
             log(f"Не вдалося завантажити кількості проекту: {exc}")
 

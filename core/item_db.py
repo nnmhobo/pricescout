@@ -100,6 +100,37 @@ def _migrate(conn):
     if "estimate_unit_price" not in pi_cols:
         conn.execute("ALTER TABLE project_items ADD COLUMN estimate_unit_price REAL")
 
+    # Keep-order mode (2026-07): a project may hold the SAME item at several
+    # positions (the кошторис lists a material under every work section, and
+    # the customer wants a 1:1 URL column against the source file). The
+    # original PRIMARY KEY (project_id, item_id) forbids that — rebuild the
+    # table as a plain rowid table. Detection by table SQL keeps this
+    # idempotent; manual adds guard uniqueness in code instead.
+    pi_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='project_items'"
+    ).fetchone()
+    if pi_sql and "PRIMARY KEY" in (pi_sql[0] or ""):
+        conn.execute("""
+            CREATE TABLE project_items_new (
+                project_id          TEXT NOT NULL,
+                item_id             TEXT NOT NULL,
+                added               TEXT NOT NULL,
+                position            INTEGER,
+                qty                 REAL,
+                estimate_unit_price REAL
+            )
+        """)
+        conn.execute("""
+            INSERT INTO project_items_new
+                (project_id, item_id, added, position, qty, estimate_unit_price)
+            SELECT project_id, item_id, added, position, qty, estimate_unit_price
+            FROM project_items
+        """)
+        conn.execute("DROP TABLE project_items")
+        conn.execute("ALTER TABLE project_items_new RENAME TO project_items")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pi_item ON project_items(item_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pi_project ON project_items(project_id, position)")
+
     # One-time migration: move legacy project_id column values into junction table
     pi_rows = conn.execute("SELECT COUNT(*) FROM project_items").fetchone()[0]
     if pi_rows == 0:
@@ -466,18 +497,26 @@ def add_item(label: str, source: str = "manual",
     }
 
 
-def batch_add_items(entries: list, project_id: str | None = None) -> tuple[int, int, int]:
+def batch_add_items(entries: list, project_id: str | None = None,
+                    keep_duplicates: bool = False) -> tuple[int, int, int]:
     """
     Bulk insert items from кошторис, preserving the file's row order.
 
     entries: ORDERED list of dicts with optional fields:
-      {label, source, avk_code, category, qty, unit, estimate_unit_price}
+      {label, source, avk_code, category, qty, unit, estimate_unit_price,
+       occurrences: [{seq, qty, unit_price}, ...]}   # from the parser's merge
 
     Items already in the DB (matched by label) are NOT re-inserted, but when
     ``project_id`` is given they ARE linked to the project. The project's
-    link set is REPLACED ("sync to file"): position = row index in the
-    imported selection, and per-project qty / estimate_unit_price are stored
-    on the link so other projects sharing the material keep their own values.
+    link set is REPLACED ("sync to file").
+
+    Link modes:
+      keep_duplicates=False (merge): ONE link per material, position = order
+        of first occurrence, qty = the entry's (already summed) quantity.
+      keep_duplicates=True (keep file order): one link PER SOURCE ROW —
+        the same item may appear at several positions, each with its own
+        row qty/estimate price (expanded from ``occurrences``). Used for the
+        1:1 URL mapping against the original Excel.
 
     Returns (added, linked, skipped):
       added   — new items inserted into the shared items table
@@ -495,7 +534,7 @@ def batch_add_items(entries: list, project_id: str | None = None) -> tuple[int, 
         }
 
         rows = []
-        links = []  # (item_id, position, qty, estimate_unit_price)
+        resolved = []  # (item_id, entry) — unique by label, in entry order
         seen_in_file: set = set()
         base_id = datetime.now().strftime("%Y%m%d%H%M%S")
         for idx, e in enumerate(entries):
@@ -521,7 +560,38 @@ def batch_add_items(entries: list, project_id: str | None = None) -> tuple[int, 
                 label_to_id[label] = item_id
                 added += 1
 
-            links.append((item_id, len(links), qty, est_up))
+            resolved.append((item_id, e))
+
+        # Build project links per mode.
+        links = []  # (item_id, position, qty, estimate_unit_price)
+        if project_id:
+            if keep_duplicates:
+                expanded = []  # (seq, item_id, qty, est)
+                for order_idx, (item_id, e) in enumerate(resolved):
+                    occs = e.get("occurrences")
+                    if not isinstance(occs, list) or not occs:
+                        occs = [{"seq": order_idx, "qty": e.get("qty"),
+                                 "unit_price": e.get("estimate_unit_price")}]
+                    for o in occs:
+                        try:
+                            seq = int(o.get("seq", order_idx))
+                        except (TypeError, ValueError):
+                            seq = order_idx
+                        expanded.append((
+                            seq, item_id,
+                            _coerce("qty", o.get("qty")),
+                            _coerce("estimate_unit_price", o.get("unit_price")),
+                        ))
+                expanded.sort(key=lambda t: t[0])
+                links = [(iid, pos, q, ep)
+                         for pos, (_seq, iid, q, ep) in enumerate(expanded)]
+            else:
+                links = [
+                    (item_id, pos,
+                     _coerce("qty", e.get("qty")),
+                     _coerce("estimate_unit_price", e.get("estimate_unit_price")))
+                    for pos, (item_id, e) in enumerate(resolved)
+                ]
 
         if rows:
             conn.executemany(
@@ -536,7 +606,7 @@ def batch_add_items(entries: list, project_id: str | None = None) -> tuple[int, 
             now_iso = datetime.now().isoformat()
             conn.execute("DELETE FROM project_items WHERE project_id=?", (project_id,))
             conn.executemany(
-                """INSERT OR IGNORE INTO project_items
+                """INSERT INTO project_items
                        (project_id, item_id, added, position, qty, estimate_unit_price)
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 [(project_id, iid, now_iso, pos, q, ep) for iid, pos, q, ep in links],
@@ -832,10 +902,19 @@ def get_project_items(project_id: str) -> list[dict]:
 
 
 def add_item_to_project(project_id: str, item_id: str):
-    """Manual add from the Projects tab — appended at the END of the order."""
+    """Manual add from the Projects tab — appended at the END of the order.
+
+    project_items no longer has a PK (keep-order imports may repeat an item),
+    so manual-add uniqueness is enforced here in code."""
     with get_conn() as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM project_items WHERE project_id=? AND item_id=? LIMIT 1",
+            (project_id, item_id),
+        ).fetchone()
+        if exists:
+            return
         conn.execute(
-            """INSERT OR IGNORE INTO project_items (project_id, item_id, added, position)
+            """INSERT INTO project_items (project_id, item_id, added, position)
                VALUES (?, ?, ?,
                        COALESCE((SELECT MAX(position) + 1 FROM project_items
                                  WHERE project_id = ?), 0))""",

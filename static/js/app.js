@@ -152,7 +152,7 @@
       setTimeout(() => {
         document.getElementById('import-stats-row').style.display = '';
         document.getElementById('import-table-wrap').style.display = 'flex';
-        document.getElementById('btn-do-import').disabled = selectedNames.size === 0;
+        _setImportButtons(selectedNames.size === 0);
         if (document.getElementById('import-tbody').innerHTML === '') {
           buildCategoryFilters();
           renderImportTable();
@@ -374,7 +374,7 @@
     document.getElementById('imp-sel').textContent    = selectedNames.size;
     document.getElementById('import-stats-row').style.display = '';
     document.getElementById('import-table-wrap').style.display = 'flex';
-    document.getElementById('btn-do-import').disabled = false;
+    _setImportButtons(false);
     const drop = document.getElementById('import-drop');
     drop.querySelector('.import-drop-txt').textContent = '✓ ' + (d.filename || 'останній імпорт');
     drop.querySelector('.import-drop-icon').style.display = 'none';
@@ -870,7 +870,7 @@
     if (!mrg) return;
     if (d && d.merged > 0) {
       mrg.textContent = `${d.rows_total} рядків у файлі → ${d.total} матеріалів ` +
-                        `(${d.merged} повторів об'єднано, кількості підсумовано)`;
+                        `(${d.merged} повторів)`;
       mrg.style.display = '';
     } else {
       mrg.style.display = 'none';
@@ -969,7 +969,7 @@
         <td><span style="display:inline-block;padding:1px 5px;background:var(--paper2);color:var(--ink3);border-radius:3px;font-size:9px">${esc(i.category)}</span></td>
       </tr>`).join('');
     document.getElementById('imp-sel').textContent = selectedNames.size;
-    document.getElementById('btn-do-import').disabled = selectedNames.size === 0;
+    _setImportButtons(selectedNames.size === 0);
     const chkAll = document.getElementById('chk-all');
     if (chkAll) {
       const allChecked = filtered.length > 0 && filtered.every(i => selectedNames.has(i.name));
@@ -983,7 +983,7 @@
     if (cb.checked) selectedNames.add(name);
     else selectedNames.delete(name);
     document.getElementById('imp-sel').textContent = selectedNames.size;
-    document.getElementById('btn-do-import').disabled = selectedNames.size === 0;
+    _setImportButtons(selectedNames.size === 0);
   }
 
   function selectAll(checked) {
@@ -999,26 +999,47 @@
     renderImportTable();
   }
 
-  async function doImport() {
+  function _setImportButtons(disabled) {
+    const b1 = document.getElementById('btn-do-import');
+    const b2 = document.getElementById('btn-import-project');
+    if (b1) b1.disabled = disabled;
+    if (b2) b2.disabled = disabled;
+  }
+
+  // toProject=false: just add unique materials to the shared DB.
+  // toProject=true:  additionally link the selection to the chosen project;
+  //   the "зберегти порядок файлу" checkbox picks between 1:1 file mirroring
+  //   (duplicates kept, for the URL column) and merge+sum.
+  async function doImport(toProject) {
     const items = importItems
       .filter(i => selectedNames.has(i.name))
       .map(i => ({
-        name:       i.name,
-        code:       i.code,
-        category:   i.category,
-        qty:        i.qty,
-        unit:       i.unit,
-        unit_price: i.unit_price,
+        name:        i.name,
+        code:        i.code,
+        category:    i.category,
+        qty:         i.qty,
+        unit:        i.unit,
+        unit_price:  i.unit_price,
+        occurrences: i.occurrences,   // per-source-row data for keep-order mode
       }));
     const projectSel = document.getElementById('import-project-select');
     const selVal = projectSel ? projectSel.value : '';
     const body = { items, filename: importFilename || null };
-    if (selVal === '__new__') {
-      const name = (document.getElementById('import-new-project-name')?.value || '').trim();
-      if (!name) { shake('import-new-project-name'); return; }
-      body.new_project_name = name;
-    } else if (selVal) {
-      body.project_id = selVal;
+
+    if (toProject) {
+      if (selVal === '__new__') {
+        const name = (document.getElementById('import-new-project-name')?.value || '').trim();
+        if (!name) { shake('import-new-project-name'); return; }
+        body.new_project_name = name;
+      } else if (selVal) {
+        body.project_id = selVal;
+      } else {
+        shake('import-project-select');
+        const res = document.getElementById('import-result');
+        if (res) { res.textContent = 'Оберіть проект або створіть новий'; }
+        return;
+      }
+      body.keep_order = !!document.getElementById('import-keep-order')?.checked;
     }
 
     const d = await fetch('/api/kostoris/import', {
@@ -1028,12 +1049,15 @@
     }).then(r => r.json());
     if (d.error) { alert(d.error); return; }
 
-    // linked = rows tied to the project (new AND already-existing items);
-    // skipped = empty / in-file duplicated rows.
-    const linkedMsg  = d.linked ? `, у проект: ${d.linked}` : '';
-    const skippedMsg = d.skipped ? `, пропущено: ${d.skipped}` : '';
-    const projMsg    = d.project_name ? ` → «${d.project_name}»` : (d.project_id ? ' → проект' : '');
-    document.getElementById('import-result').textContent = `Додано нових: ${d.added}${linkedMsg}${skippedMsg}${projMsg}`;
+    const projMsg = d.project_name ? ` → «${d.project_name}»` : (d.project_id ? ' → проект' : '');
+    let txt = `Додано нових: ${d.added}`;
+    if (d.project_id) {
+      txt += d.keep_order
+        ? `, у проект: ${d.linked} позицій у порядку файлу (з повторами)`
+        : `, у проект: ${d.linked} унікальних (кількості підсумовано)`;
+    }
+    if (d.skipped) txt += `, пропущено: ${d.skipped}`;
+    document.getElementById('import-result').textContent = txt + projMsg;
     loadItems();
     loadItemsTab();
     await loadProjects();
@@ -1348,7 +1372,12 @@
       const items = await fetch(`/api/projects/${monitorProjectId}/items`).then(r => r.json());
       _setActiveQueue(Array.isArray(items) ? items : []);
       monitorDone = 0;
-      if (info) info.textContent = `${monitorQueue.length} матеріалів у порядку кошторису`;
+      if (info) {
+        const uniq = new Set(monitorQueue.map(i => i.id)).size;
+        info.textContent = uniq === monitorQueue.length
+          ? `${monitorQueue.length} матеріалів у порядку кошторису`
+          : `${monitorQueue.length} позицій (${uniq} унікальних — моніторинг без повторів) у порядку кошторису`;
+      }
     } catch (e) {
       if (info) info.textContent = 'Не вдалося завантажити проект';
     }
@@ -1805,7 +1834,10 @@
     const limit    = getBatchLimit();
     const parallel = getBatchParallel();
     const payload = {
-      item_ids: monitorQueue.map(i => i.id),
+      // Keep-order project queues may list the same item at several
+      // positions — monitoring always runs UNIQUE materials (first-
+      // occurrence order preserved by Set iteration).
+      item_ids: [...new Set(monitorQueue.map(i => i.id))],
       suppliers: activeSups,
       parallel_items: parallel,
     };

@@ -19,6 +19,7 @@ def _parse_df(df: pd.DataFrame) -> list[dict]:
     items: list[dict] = []
     by_key: dict[str, dict] = {}
     merged_rows = 0
+    seq = 0   # ordinal of the matched row within the file (0-based)
 
     for _, row in df.iterrows():
         code_raw  = str(row[1]) if pd.notna(row[1]) else ''
@@ -55,9 +56,14 @@ def _parse_df(df: pd.DataFrame) -> list[dict]:
             # output: the resource is listed under EVERY work section it is
             # used in, each with its own quantity. Merge into one entry and
             # SUM the quantities (when units match), so project totals are
-            # correct. `rows` counts the merged source rows for the UI.
+            # correct. `rows` counts the merged source rows for the UI;
+            # `occurrences` keeps every source row (ordinal + its own qty /
+            # price) so keep-order project imports can restore the file 1:1.
             merged_rows += 1
             existing['rows'] += 1
+            existing['occurrences'].append(
+                {'seq': seq, 'qty': qty, 'unit_price': unit_price})
+            seq += 1
             if qty is not None and \
                (existing.get('unit') or '').strip().lower() == unit.strip().lower():
                 existing['qty'] = round((existing.get('qty') or 0) + qty, 6)
@@ -176,7 +182,10 @@ def _parse_df(df: pd.DataFrame) -> list[dict]:
             'retail':     is_retail,
             'category':   category,
             'rows':       1,   # how many file rows were merged into this entry
+            # every source row of this material: file ordinal + row qty/price
+            'occurrences': [{'seq': seq, 'qty': qty, 'unit_price': unit_price}],
         }
+        seq += 1
         items.append(item)
         by_key[key] = item
 
