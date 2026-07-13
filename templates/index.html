@@ -169,7 +169,10 @@
         </div>
       </div>
 
-      <div id="exports-container"><div class="exports-empty">Завантаження…</div></div>
+      <!-- flex:1 + min-height:0 + overflow-y:auto — the list scrolls inside
+           the panel (which is overflow:hidden); the enrichment card above
+           stays fixed. -->
+      <div id="exports-container" style="flex:1;min-height:0;overflow-y:auto;padding-right:4px"><div class="exports-empty">Завантаження…</div></div>
     </div>
 
     <!-- Monitor -->
