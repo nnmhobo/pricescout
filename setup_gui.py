@@ -47,7 +47,7 @@ CHILD_ENV = {
     "PIP_NO_INPUT": "1",
 }
 
-MAX_LOG_LINES = 2000
+MAX_LOG_LINES = 2000  # log widget scrollback cap
 
 # Window icon — the app's "PS" brand mark (gold box on ink) pre-rendered as
 # tiny PNGs and embedded base64, so the launcher stays a single stdlib-only
@@ -228,6 +228,17 @@ class LauncherApp:
     def ui(self, fn, *args):
         self.root.after(0, lambda: fn(*args))
 
+    def _hide_progress(self):
+        """Stop AND remove the progress bar — once the app is running (or
+        setup failed) a leftover half-filled bar just looks broken."""
+        def _h():
+            try:
+                self.progress.stop()
+                self.progress.pack_forget()
+            except Exception:
+                pass
+        self.root.after(0, _h)
+
     def set_status(self, text: str):
         self.root.after(0, lambda: self.status.configure(text=text))
 
@@ -282,7 +293,7 @@ class LauncherApp:
         except Exception as exc:  # last-resort guard — show, don't vanish
             self.log(f"[КРИТИЧНО] {exc}")
             self.set_status(f"Помилка: {exc}")
-            self.ui(self.progress.stop)
+            self._hide_progress()
 
     def _do_setup_and_launch(self):
         self.ui(self.progress.start, 12)
@@ -293,7 +304,7 @@ class LauncherApp:
             for i in range(4):
                 self.mark_step(i, "skip")
             self.set_status(f"PriceScout вже запущено — {URL}")
-            self.ui(self.progress.stop)
+            self._hide_progress()
             self.root.after(0, lambda: self.btn_open.configure(state="normal"))
             webbrowser.open(URL)
             return
@@ -379,7 +390,7 @@ class LauncherApp:
 
         self.mark_step(3, "ok")
         self.set_status(f"PriceScout запущено — {URL}   (закриття вікна зупинить програму)")
-        self.ui(self.progress.stop)
+        self._hide_progress()
         self.root.after(0, lambda: (self.btn_open.configure(state="normal"),
                                     self.btn_stop.configure(state="normal")))
         webbrowser.open(URL)
@@ -393,7 +404,7 @@ class LauncherApp:
 
     def _fail(self, msg: str):
         self.set_status(f"⚠ {msg}")
-        self.ui(self.progress.stop)
+        self._hide_progress()
         self.root.after(0, lambda: self.btn_log.focus_set())
         if not self.log_visible:
             self.root.after(0, self.toggle_log)
