@@ -47,7 +47,7 @@ CHILD_ENV = {
     "PIP_NO_INPUT": "1",
 }
 
-MAX_LOG_LINES = 2000  # log widget scrollback cap
+MAX_LOG_LINES = 2000  # log Text widget scrollback cap
 
 # Window icon — the app's "PS" brand mark (gold box on ink) pre-rendered as
 # tiny PNGs and embedded base64, so the launcher stays a single stdlib-only
@@ -135,7 +135,10 @@ class LauncherApp:
         self.root = root
         self.proc: subprocess.Popen | None = None
         self.external = False   # server was already running (we don't own it)
+        self._hwnd = None
         self._build_ui()
+        self._center()
+        self.root.after(50, self._apply_win_styles)
         threading.Thread(target=self._worker, daemon=True).start()
 
     # ── UI construction ────────────────────────────────────────
@@ -149,19 +152,32 @@ class LauncherApp:
             r.iconphoto(True, *self._icons)
         except Exception:
             pass
+
+        INK, GOLD = "#141820", "#b5924c"
+        self._ink, self._gold = INK, GOLD
+
+        # ── Borderless window ─────────────────────────────────────
+        # No native title bar on any OS; the dark brand header doubles as
+        # the title bar (drag to move, custom — / ✕ buttons). A 1-px gold
+        # outline replaces the system frame. Windows-specific fixes
+        # (taskbar entry, minimize, Win11 rounded corners) in _apply_win_styles.
+        r.overrideredirect(True)
+        r.configure(highlightthickness=1, highlightbackground=GOLD,
+                    highlightcolor=GOLD)
         r.geometry("560x340")
-        r.minsize(520, 300)
         r.protocol("WM_DELETE_WINDOW", self.on_close)
+        # Safety net: overrideredirect windows may be destroyed without the
+        # WM_DELETE protocol firing (e.g. Alt+F4) — never orphan the server.
+        r.bind("<Destroy>", self._on_destroy_event)
 
         # Header — mirrors the app's top-left brand block (dark strip, gold
         # "PS" box, serif name). The logo is drawn on a Canvas: the web app's
         # logo is pure CSS, there is no image asset to load (and this file
         # must stay stdlib-only anyway).
-        INK, GOLD = "#141820", "#b5924c"
         head = tk.Frame(r, bg=INK)
         head.pack(fill="x")
         brand = tk.Frame(head, bg=INK)
-        brand.pack(anchor="w", padx=16, pady=10)
+        brand.pack(side="left", padx=16, pady=10)
         logo = tk.Canvas(brand, width=38, height=38, bg=INK,
                          highlightthickness=0, bd=0)
         logo.create_rectangle(3, 3, 35, 35, outline=GOLD, width=2)
@@ -169,10 +185,24 @@ class LauncherApp:
         logo.pack(side="left", padx=(0, 10))
         names = tk.Frame(brand, bg=INK)
         names.pack(side="left")
-        tk.Label(names, text="PriceScout", bg=INK, fg="#ffffff",
-                 font=("Georgia", 14)).pack(anchor="w")
-        tk.Label(names, text="МОНІТОРИНГ ЦІН БУДМАТЕРІАЛІВ", bg=INK,
-                 fg="#6b7078", font=("Segoe UI", 7)).pack(anchor="w")
+        name_lbl = tk.Label(names, text="PriceScout", bg=INK, fg="#ffffff",
+                            font=("Georgia", 14))
+        name_lbl.pack(anchor="w")
+        sub_lbl = tk.Label(names, text="МОНІТОРИНГ ЦІН БУДМАТЕРІАЛІВ", bg=INK,
+                           fg="#6b7078", font=("Segoe UI", 7))
+        sub_lbl.pack(anchor="w")
+
+        # Window controls (custom title-bar buttons)
+        controls = tk.Frame(head, bg=INK)
+        controls.pack(side="right", anchor="n")
+        self._win_btn(controls, "✕", "#c0392b", self.on_close)
+        self._win_btn(controls, "—", "#2a3242", self._minimize)
+
+        # Drag-to-move on the whole header area
+        for w in (head, brand, logo, names, name_lbl, sub_lbl):
+            w.bind("<Button-1>", self._drag_start)
+            w.bind("<B1-Motion>", self._drag_move)
+
         # thin gold underline, like the header's gradient rule in the app
         tk.Frame(r, bg=GOLD, height=1).pack(fill="x")
 
@@ -214,6 +244,80 @@ class LauncherApp:
         scroll.pack(side="right", fill="y")
         self.log_text.pack(fill="both", expand=True)
         self.log_visible = False
+
+    # ── Borderless-window plumbing ─────────────────────────────
+    def _win_btn(self, parent, char, hover_bg, cmd):
+        """Flat title-bar button (tk.Label — stylable, unlike native buttons)."""
+        b = tk.Label(parent, text=char, bg=self._ink, fg="#9aa4b2",
+                     font=("Segoe UI", 10), width=4, pady=6, cursor="hand2")
+        b.pack(side="right")
+        b.bind("<Button-1>", lambda e: cmd())
+        b.bind("<Enter>", lambda e: b.configure(bg=hover_bg, fg="#ffffff"))
+        b.bind("<Leave>", lambda e: b.configure(bg=self._ink, fg="#9aa4b2"))
+        return b
+
+    def _drag_start(self, e):
+        self._drag_off = (e.x_root - self.root.winfo_x(),
+                          e.y_root - self.root.winfo_y())
+
+    def _drag_move(self, e):
+        off = getattr(self, "_drag_off", None)
+        if off:
+            self.root.geometry(f"+{e.x_root - off[0]}+{e.y_root - off[1]}")
+
+    def _minimize(self):
+        if sys.platform == "win32" and getattr(self, "_hwnd", None):
+            import ctypes
+            ctypes.windll.user32.ShowWindow(self._hwnd, 6)   # SW_MINIMIZE
+        else:
+            try:
+                self.root.iconify()
+            except Exception:
+                pass
+
+    def _apply_win_styles(self):
+        """Windows: overrideredirect windows lose their taskbar entry and
+        minimize ability — re-add WS_EX_APPWINDOW via ctypes. On Win11 also
+        request rounded corners (silently ignored on Win10)."""
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            u32 = ctypes.windll.user32
+            GWL_EXSTYLE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW = -20, 0x40000, 0x80
+            hwnd = u32.GetParent(self.root.winfo_id())
+            get_l = getattr(u32, "GetWindowLongPtrW", u32.GetWindowLongW)
+            set_l = getattr(u32, "SetWindowLongPtrW", u32.SetWindowLongW)
+            style = get_l(hwnd, GWL_EXSTYLE)
+            set_l(hwnd, GWL_EXSTYLE, (style | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW)
+            self._hwnd = hwnd
+            try:  # Win11 rounded corners: DWMWA_WINDOW_CORNER_PREFERENCE = ROUND
+                pref = ctypes.c_int(2)
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, 33, ctypes.byref(pref), ctypes.sizeof(pref))
+            except Exception:
+                pass
+            # Re-map so the new style takes effect (taskbar entry appears).
+            self.root.withdraw()
+            self.root.after(10, self.root.deiconify)
+        except Exception:
+            self._hwnd = None
+
+    def _center(self):
+        self.root.update_idletasks()
+        w = self.root.winfo_width() or 560
+        h = self.root.winfo_height() or 340
+        x = (self.root.winfo_screenwidth() - w) // 2
+        y = max(0, (self.root.winfo_screenheight() - h) // 3)
+        self.root.geometry(f"+{x}+{y}")
+
+    def _on_destroy_event(self, e):
+        # Fires for every child too — act only on the toplevel itself.
+        if e.widget is self.root and self.proc and self.proc.poll() is None:
+            try:
+                self.proc.terminate()
+            except Exception:
+                pass
 
     def toggle_log(self):
         if self.log_visible:
