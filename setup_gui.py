@@ -47,7 +47,54 @@ CHILD_ENV = {
     "PIP_NO_INPUT": "1",
 }
 
-MAX_LOG_LINES = 2000
+MAX_LOG_LINES = 2000  # log Text widget scrollback cap
+
+# Window icon — the app's "PS" brand mark (gold box on ink) pre-rendered as
+# tiny PNGs and embedded base64, so the launcher stays a single stdlib-only
+# file with no image assets. Without this, Windows shows the default Tcl/Tk
+# feather icon in the title bar and taskbar.
+ICON_16 = (
+    "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABA0lEQVR42mPcOsnnPwMFgIWBgYEh"
+    "vu0KWZoXVukwMDFQCAbeABZkTm6QHIOJBh8DAwMDw6/f/xgOXfrAsP/8O4bsAFkGSWF2BkZGBoZJ"
+    "ax4xnL31CbsLpm14zMDAAFG0//x7BhdjIQZTDT6G+y++M6R1X2NYvOs5cV7IC5FjcDQUZNh9+i3D"
+    "vrPvGH79/scQ6y7JICfOwfDgxXfcXoCB/lUPGS7c+czAwMDA4GkuwnDh9meGqw++MMS6SzF4W4oy"
+    "LNr5DLsLsgJkGRgYGBgKw+QZRPjZ4OKFYfIMs0u1GbTkuRlO3/iI2wWT1z3CcM32k28Ytp98M4jT"
+    "wSBJiQurdMg2AACiMk2XQ3VYZgAAAABJRU5ErkJggg=="
+)
+ICON_32 = (
+    "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACaklEQVR42u2XXUiTURzGf/vwnZtO"
+    "nVO2UZqGoqGUwVghEVKIEXQhUUJdGN0ESRfRRSVdSxeFFBUJXeRdUlCIN0VWN0opmoE4cwathbr2"
+    "7VzbXp1vF+r6YFFq9hbsf/f+Dy/nx/Oc85xzFAXmEgkZSw3Q2Voty+TNbaMokbnUPxL9jfpWcdkV"
+    "SAOkAf6tbbhSNWV6zh7dkvKHSDTBlC/Ok0EfA/ZQsm+tyKHBVoDFqCFDrcAbFHk3FeXlWBC7M4Ik"
+    "rUKBkckwzW2jBMLzAMxFE5xoG+VChwN3QKR8s46WxiIabEYAGmxGzhwuZsYf59IdBy3tdm48dKHJ"
+    "UHL+WCkVxVnrt0ACpn1x7r9wJ3t1NfkAHNhVAEDvkJ/g3AILCYlpX5zb3S68IfHPrgGF4nsogNys"
+    "JScP1RZiMghfxyU4d3OCcWdkdWsg5cSA2ajhSJ0p2Xs+7AfgU0DEYtRgrczBWpmDJyhid0YYmQzz"
+    "ZjLMQkJaH0C2VsXd5fyOxBI4Pn7m8YCXwfFZALqezXC6sQhBvSRoYZ5AYZ7A3h0G3H6Rq13vcQfE"
+    "tQPMRRO0tNt/Ov7aEeZih4Pa6jxqyvSUWLSolEtemfIFmvabuf7gw/os+FV5Q/N093no7vOQKSip"
+    "Ks2maZ8Zk0Fgq0W7sUF0+VQ5O8v1ye+YuMjQ21l6h3wAROOLG5+EJw9uwrYtF71OhVqloNiUyZ7t"
+    "BgCeLoOsOQmztSo6W6sZnpjlWgovr9xzsrsql3qrkeP1FvQ6FTFxEZc7xq1HLl6NhVYHsJKEv++/"
+    "SE+/h55+T/o0TAOkAf7zK5kcb0TZFVDI/Tz/ArPb14k4K1U4AAAAAElFTkSuQmCC"
+)
+ICON_48 = (
+    "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAADoElEQVR42u2aX0xbVRzHP3ft6PqH"
+    "3rCCdOsoReboBhrdxiAmxmiIZtEXk7n5ps/6sGzxCY1PRt/UmPCivkxjYlzMEhPjyJxh/omC3cbU"
+    "SXEwS6VS1tJCy720t7f3+gDrLBQEpR1N7vfl5p5z7rn3c87vz/klV6h3+3SqWGaAM70dVfnxz7/x"
+    "K9uoclU9gLnUtmxlLTd3w4QMAAPAADAADAADYEsdJZar79R+HFbTmmN0IJPViCayXBtPc/FygpSk"
+    "rnyZSeCRB+o47HfSdM8OHFYTSk4nLaukZZXJWJYbkzJjEZmpmezmALz09ggAr73QSutua6H9y8E4"
+    "n1yMItrNPNHp4umHG2jZZaVll5WeQy7e/SzMaFgqjN/p3M7Lz/nw1FsYmZDoO/cnk7cy5FQd0WHm"
+    "gM/OU90NPPpgHQCvvD/GZCxTfhOak1TODkzzw/XZQpvDauLUs15E++L6CAKcPObFU29BUTXe+nSC"
+    "0bCElMmjqBqxWYVLw0le/+gm8Tnl7vjAhZ9miu6tFlNhNdua7Pjci7s3L+dRclrJOVKSyoVAYnN9"
+    "YL2aSqxcOW+jdem6o8iUDu5zcuX3VMl5zg/GOT8YrzyAIJRwbn2x3NaWVd0nj3kJhiUCwRTXQ/P8"
+    "Fc+WLwqtV7tdlhVtE9OLThgtEVH8Xjt+r73gRyMhieHxNJeDKRRVqzzAk0fqi+7lTJ5vriUB+C0k"
+    "EYll8TRYSj4r2s10t4t0t4uke1Q+7J9iaGSuMk4s2s2ceNxNp99ZaJtfyPPO2XAhF2i6Tt+58LpM"
+    "pdZm5sVnmjjc5izvDhztqudo151VzyhLiWwszVclElkknuXVD8Z4aF8tXftF2n0O7KskSAE4/pib"
+    "wGiqfAC3E9lGlNd0AsEUgWAKQYDmRivtPjsH25zs9diKxjburMHl3M5MKlcZH9iodB1C0QVC0QW+"
+    "+DFOq8fG6ePNRccW0WH+V4CKHOZaPTbO9HZwaA27Ho/I9A8Vx/+MopXfiTeiI35xzf60nC+KYtMJ"
+    "ZWsBdB0Q6WhxrNp//713+vqHZshrevmc+L9m69Mnmrk0nOTbn5PcSirkVJ3Guhp6Ol0FExu4muDz"
+    "72PlrQf+GUbf/PgPghPSqnPcjMj0vneD+/bY2LvHRrPbSkeLg1qbCUvNNrKKRmwux9dXEnz3yyzj"
+    "EXnzMvHteuB/RZylPBCJZxkYTholpQFgABgABoABYAAYAFtFK85C1fbbgWFCd1tCtf9u8zewdF+x"
+    "PYYEYgAAAABJRU5ErkJggg=="
+)
 
 
 def read_port() -> int:
@@ -88,22 +135,76 @@ class LauncherApp:
         self.root = root
         self.proc: subprocess.Popen | None = None
         self.external = False   # server was already running (we don't own it)
+        self._hwnd = None
         self._build_ui()
+        self._center()
+        self.root.after(50, self._apply_win_styles)
         threading.Thread(target=self._worker, daemon=True).start()
 
     # ── UI construction ────────────────────────────────────────
     def _build_ui(self):
         r = self.root
         r.title("PriceScout")
-        r.geometry("560x300")
-        r.minsize(520, 260)
-        r.protocol("WM_DELETE_WINDOW", self.on_close)
+        # Replace the default Tcl/Tk feather icon with the PS brand mark.
+        # References are kept on self — Tk drops images that get GC'd.
+        try:
+            self._icons = [tk.PhotoImage(data=d) for d in (ICON_48, ICON_32, ICON_16)]
+            r.iconphoto(True, *self._icons)
+        except Exception:
+            pass
 
-        head = ttk.Frame(r, padding=(16, 12, 16, 4))
+        INK, GOLD = "#141820", "#b5924c"
+        self._ink, self._gold = INK, GOLD
+
+        # ── Borderless window ─────────────────────────────────────
+        # No native title bar on any OS; the dark brand header doubles as
+        # the title bar (drag to move, custom — / ✕ buttons). A 1-px gold
+        # outline replaces the system frame. Windows-specific fixes
+        # (taskbar entry, minimize, Win11 rounded corners) in _apply_win_styles.
+        r.overrideredirect(True)
+        r.configure(highlightthickness=1, highlightbackground=GOLD,
+                    highlightcolor=GOLD)
+        r.geometry("560x340")
+        r.protocol("WM_DELETE_WINDOW", self.on_close)
+        # Safety net: overrideredirect windows may be destroyed without the
+        # WM_DELETE protocol firing (e.g. Alt+F4) — never orphan the server.
+        r.bind("<Destroy>", self._on_destroy_event)
+
+        # Header — mirrors the app's top-left brand block (dark strip, gold
+        # "PS" box, serif name). The logo is drawn on a Canvas: the web app's
+        # logo is pure CSS, there is no image asset to load (and this file
+        # must stay stdlib-only anyway).
+        head = tk.Frame(r, bg=INK)
         head.pack(fill="x")
-        ttk.Label(head, text="PriceScout", font=("Georgia", 18, "bold")).pack(anchor="w")
-        ttk.Label(head, text="Моніторинг цін будматеріалів",
-                  foreground="#777").pack(anchor="w")
+        brand = tk.Frame(head, bg=INK)
+        brand.pack(side="left", padx=16, pady=10)
+        logo = tk.Canvas(brand, width=38, height=38, bg=INK,
+                         highlightthickness=0, bd=0)
+        logo.create_rectangle(3, 3, 35, 35, outline=GOLD, width=2)
+        logo.create_text(19, 19, text="PS", fill=GOLD, font=("Georgia", 12))
+        logo.pack(side="left", padx=(0, 10))
+        names = tk.Frame(brand, bg=INK)
+        names.pack(side="left")
+        name_lbl = tk.Label(names, text="PriceScout", bg=INK, fg="#ffffff",
+                            font=("Georgia", 14))
+        name_lbl.pack(anchor="w")
+        sub_lbl = tk.Label(names, text="МОНІТОРИНГ ЦІН БУДМАТЕРІАЛІВ", bg=INK,
+                           fg="#6b7078", font=("Segoe UI", 7))
+        sub_lbl.pack(anchor="w")
+
+        # Window controls (custom title-bar buttons)
+        controls = tk.Frame(head, bg=INK)
+        controls.pack(side="right", anchor="n")
+        self._win_btn(controls, "✕", "#c0392b", self.on_close)
+        self._win_btn(controls, "—", "#2a3242", self._minimize)
+
+        # Drag-to-move on the whole header area
+        for w in (head, brand, logo, names, name_lbl, sub_lbl):
+            w.bind("<Button-1>", self._drag_start)
+            w.bind("<B1-Motion>", self._drag_move)
+
+        # thin gold underline, like the header's gradient rule in the app
+        tk.Frame(r, bg=GOLD, height=1).pack(fill="x")
 
         body = ttk.Frame(r, padding=(16, 8))
         body.pack(fill="both", expand=True)
@@ -118,7 +219,9 @@ class LauncherApp:
         self.progress.pack(fill="x", pady=(10, 4))
 
         self.status = ttk.Label(body, text="Підготовка…")
-        self.status.pack(anchor="w")
+        # Top padding keeps the status line visually separated from the step
+        # list even after the progress bar is hidden on launch.
+        self.status.pack(anchor="w", pady=(10, 0))
 
         btns = ttk.Frame(r, padding=(16, 4, 16, 6))
         btns.pack(fill="x")
@@ -142,20 +245,105 @@ class LauncherApp:
         self.log_text.pack(fill="both", expand=True)
         self.log_visible = False
 
+    # ── Borderless-window plumbing ─────────────────────────────
+    def _win_btn(self, parent, char, hover_bg, cmd):
+        """Flat title-bar button (tk.Label — stylable, unlike native buttons)."""
+        b = tk.Label(parent, text=char, bg=self._ink, fg="#9aa4b2",
+                     font=("Segoe UI", 10), width=4, pady=6, cursor="hand2")
+        b.pack(side="right")
+        b.bind("<Button-1>", lambda e: cmd())
+        b.bind("<Enter>", lambda e: b.configure(bg=hover_bg, fg="#ffffff"))
+        b.bind("<Leave>", lambda e: b.configure(bg=self._ink, fg="#9aa4b2"))
+        return b
+
+    def _drag_start(self, e):
+        self._drag_off = (e.x_root - self.root.winfo_x(),
+                          e.y_root - self.root.winfo_y())
+
+    def _drag_move(self, e):
+        off = getattr(self, "_drag_off", None)
+        if off:
+            self.root.geometry(f"+{e.x_root - off[0]}+{e.y_root - off[1]}")
+
+    def _minimize(self):
+        if sys.platform == "win32" and getattr(self, "_hwnd", None):
+            import ctypes
+            ctypes.windll.user32.ShowWindow(self._hwnd, 6)   # SW_MINIMIZE
+        else:
+            try:
+                self.root.iconify()
+            except Exception:
+                pass
+
+    def _apply_win_styles(self):
+        """Windows: overrideredirect windows lose their taskbar entry and
+        minimize ability — re-add WS_EX_APPWINDOW via ctypes. On Win11 also
+        request rounded corners (silently ignored on Win10)."""
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            u32 = ctypes.windll.user32
+            GWL_EXSTYLE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW = -20, 0x40000, 0x80
+            hwnd = u32.GetParent(self.root.winfo_id())
+            get_l = getattr(u32, "GetWindowLongPtrW", u32.GetWindowLongW)
+            set_l = getattr(u32, "SetWindowLongPtrW", u32.SetWindowLongW)
+            style = get_l(hwnd, GWL_EXSTYLE)
+            set_l(hwnd, GWL_EXSTYLE, (style | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW)
+            self._hwnd = hwnd
+            try:  # Win11 rounded corners: DWMWA_WINDOW_CORNER_PREFERENCE = ROUND
+                pref = ctypes.c_int(2)
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, 33, ctypes.byref(pref), ctypes.sizeof(pref))
+            except Exception:
+                pass
+            # Re-map so the new style takes effect (taskbar entry appears).
+            self.root.withdraw()
+            self.root.after(10, self.root.deiconify)
+        except Exception:
+            self._hwnd = None
+
+    def _center(self):
+        self.root.update_idletasks()
+        w = self.root.winfo_width() or 560
+        h = self.root.winfo_height() or 340
+        x = (self.root.winfo_screenwidth() - w) // 2
+        y = max(0, (self.root.winfo_screenheight() - h) // 3)
+        self.root.geometry(f"+{x}+{y}")
+
+    def _on_destroy_event(self, e):
+        # Fires for every child too — act only on the toplevel itself.
+        if e.widget is self.root and self.proc and self.proc.poll() is None:
+            try:
+                self.proc.terminate()
+            except Exception:
+                pass
+
     def toggle_log(self):
         if self.log_visible:
             self.log_frame.pack_forget()
-            self.root.geometry("560x300")
+            self.root.geometry("560x340")
             self.btn_log.configure(text="Детальніше ▾")
         else:
             self.log_frame.pack(fill="both", expand=True)
-            self.root.geometry("560x460")
+            self.root.geometry("560x500")
             self.btn_log.configure(text="Згорнути ▴")
         self.log_visible = not self.log_visible
 
     # ── Thread-safe UI helpers ─────────────────────────────────
     def ui(self, fn, *args):
         self.root.after(0, lambda: fn(*args))
+
+    def _hide_progress(self):
+        """Stop AND remove the progress bar — once the app is running (or
+        setup failed) a leftover half-filled bar just looks broken."""
+        def _h():
+            try:
+                self.progress.stop()
+                self.progress.pack_forget()
+            except Exception:
+                pass
+        self.root.after(0, _h)
 
     def set_status(self, text: str):
         self.root.after(0, lambda: self.status.configure(text=text))
@@ -211,7 +399,7 @@ class LauncherApp:
         except Exception as exc:  # last-resort guard — show, don't vanish
             self.log(f"[КРИТИЧНО] {exc}")
             self.set_status(f"Помилка: {exc}")
-            self.ui(self.progress.stop)
+            self._hide_progress()
 
     def _do_setup_and_launch(self):
         self.ui(self.progress.start, 12)
@@ -222,7 +410,7 @@ class LauncherApp:
             for i in range(4):
                 self.mark_step(i, "skip")
             self.set_status(f"PriceScout вже запущено — {URL}")
-            self.ui(self.progress.stop)
+            self._hide_progress()
             self.root.after(0, lambda: self.btn_open.configure(state="normal"))
             webbrowser.open(URL)
             return
@@ -308,7 +496,7 @@ class LauncherApp:
 
         self.mark_step(3, "ok")
         self.set_status(f"PriceScout запущено — {URL}   (закриття вікна зупинить програму)")
-        self.ui(self.progress.stop)
+        self._hide_progress()
         self.root.after(0, lambda: (self.btn_open.configure(state="normal"),
                                     self.btn_stop.configure(state="normal")))
         webbrowser.open(URL)
@@ -322,7 +510,7 @@ class LauncherApp:
 
     def _fail(self, msg: str):
         self.set_status(f"⚠ {msg}")
-        self.ui(self.progress.stop)
+        self._hide_progress()
         self.root.after(0, lambda: self.btn_log.focus_set())
         if not self.log_visible:
             self.root.after(0, self.toggle_log)

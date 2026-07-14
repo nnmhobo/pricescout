@@ -146,7 +146,9 @@ All access goes through `core/item_db.py`, which uses a `@contextmanager get_con
 | qty | REAL | **Per-project** quantity — overrides `items.qty` in `get_project_items()` so two projects can share a material with different amounts. |
 | estimate_unit_price | REAL | Per-project estimate price (same override rule). |
 
-A project mirrors ONE imported file: importing into a project **replaces** its link set ("sync to file") via `batch_add_items` — existing items (matched by label) are linked too, not just newly inserted ones.
+⚠ **No PRIMARY KEY** (rebuilt 2026-07, detected via table SQL in `_migrate`): keep-order imports may store the SAME item at several positions — one per source row, each with its own qty/price (expanded from the parser's `occurrences`). Manual adds enforce uniqueness in code (`add_item_to_project`).
+
+A project mirrors ONE imported file: importing into a project **replaces** its link set ("sync to file") via `batch_add_items(entries, project_id, keep_duplicates)` — existing items (matched by label) are linked too, not just newly inserted ones. `keep_duplicates=True` → 1:1 file mirroring (URL column aligns with the source Excel); `False` → one link per material with summed qty. Monitoring always runs UNIQUE ids (frontend dedupes `item_ids`; runner sums the duplicate rows' quantities for result totals).
 
 ### `price_history`
 | Column | Type | Notes |
@@ -274,7 +276,7 @@ All routes are Flask Blueprints registered in `app.py`. All return JSON unless n
 | Method | Path | Description |
 |---|---|---|
 | POST | `/api/kostoris/parse` | Multipart upload (`file`). Validates extension (`.xls`/`.xlsx`) and size (1 KB–20 MB), writes to a **temp file**, calls `parsers.kostoris_parser.parse(path)`. Returns `{total, rows_total, merged, retail, items, filename}` (total = unique materials; merged = repeat rows whose qty was summed) and saves it to `data/last_import.json`. Does NOT touch the DB. |
-| POST | `/api/kostoris/import` | Body: `{items: [ORDERED {name, code?, category?, qty?, unit?, unit_price?}], project_id? \| new_project_name?, filename?}` (legacy alt: `{names: [...]}`). `new_project_name` creates the project first (`filename` stored as `avk_file`). Bulk-inserts via `batch_add_items`: new items created, existing (by label) reused, ALL linked to the project with positions (sync-to-file). Returns `{added, linked, skipped, project_id, project_name}`. |
+| POST | `/api/kostoris/import` | Body: `{items: [ORDERED {name, code?, category?, qty?, unit?, unit_price?}], project_id? \| new_project_name?, filename?}` (legacy alt: `{names: [...]}`). `new_project_name` creates the project first (`filename` stored as `avk_file`). `keep_order: true` → project stores EVERY source row (duplicates included, from items' `occurrences`); else merge+sum. Bulk-inserts via `batch_add_items`: new items created, existing (by label) reused, ALL linked with positions (sync-to-file). Returns `{added, linked, skipped, keep_order, project_id, project_name}`. |
 | GET | `/api/kostoris/last` | Returns `data/last_import.json` content or `null`. |
 
 ### Projects routes (`routes/projects.py`)
