@@ -1,0 +1,39 @@
+name: Notify customer on main update
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Zip main branch
+        run: git archive --format=zip -o PriceScout.zip HEAD
+
+      - name: Email customer with zip attached
+        uses: dawidd6/action-send-mail@v18
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "PriceScout: нова версія 🎉"
+          to: ${{ vars.CUSTOMER_EMAIL }}
+          from: "PriceScout Team"
+          body: |
+            Доброго дня!
+
+            Раді повідомити — вийшла нова версія PriceScout! Архів з оновленням — у вкладенні.
+
+            Як запустити:
+            1. Розпакуйте архів
+            2. Запустіть START.bat
+
+            З повагою,
+            Команда PriceScout
+          attachments: PriceScout.zip
