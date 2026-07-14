@@ -18,7 +18,7 @@ jobs:
       - name: Email customer with zip attached
         uses: dawidd6/action-send-mail@v18
         with:
-          server_address: smtp.zoho.eugi
+          server_address: smtp.zoho.eu
           server_port: 465
           username: ${{ secrets.SMTP_USERNAME }}
           password: ${{ secrets.SMTP_PASSWORD }}
