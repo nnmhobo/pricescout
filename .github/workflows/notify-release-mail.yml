@@ -24,7 +24,7 @@ jobs:
           password: ${{ secrets.SMTP_PASSWORD }}
           subject: "PriceScout: нова версія 🎉"
           to: ${{ vars.CUSTOMER_EMAIL }}
-          from: "PriceScout Team"
+          from: "PriceScout Team <${{ secrets.SMTP_USERNAME }}>"
           body: |
             Доброго дня!
 
