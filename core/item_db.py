@@ -88,6 +88,15 @@ def _migrate(conn):
             PRIMARY KEY (project_id, item_id)
         );
     """)
+    # Project type (feature 2026-08): a project mirrors ONE imported
+    # кошторис file, and which of the two supported layouts that file was
+    # (КД_ПВР / КД_РЛМТ) decides how /api/projects/<id>/export lays the
+    # items back out. 'pvr' default covers every project that predates this
+    # column — they were all КД_ПВР, the only format that existed then.
+    p_cols = {r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()}
+    if "project_type" not in p_cols:
+        conn.execute("ALTER TABLE projects ADD COLUMN project_type TEXT NOT NULL DEFAULT 'pvr'")
+
     # Per-project ordering + per-project estimate values (feature 2026-07):
     # a project mirrors ONE imported кошторис file — items keep the file's
     # row order (position), and qty / estimate_unit_price live on the link
@@ -99,6 +108,12 @@ def _migrate(conn):
         conn.execute("ALTER TABLE project_items ADD COLUMN qty REAL")
     if "estimate_unit_price" not in pi_cols:
         conn.execute("ALTER TABLE project_items ADD COLUMN estimate_unit_price REAL")
+    if "section" not in pi_cols:
+        # Which of a КД_РЛМТ file's two sections (1=ціноутворюючі, >=60% of
+        # value; 2=неціноутворюючі, <=40%) this link's source row came from
+        # (feature 2026-08). NULL for КД_ПВР projects and for manual
+        # "+ Додати матеріал" adds — export treats NULL/missing as section 2.
+        conn.execute("ALTER TABLE project_items ADD COLUMN section INTEGER")
 
     # Keep-order mode (2026-07): a project may hold the SAME item at several
     # positions (the кошторис lists a material under every work section, and
@@ -117,13 +132,14 @@ def _migrate(conn):
                 added               TEXT NOT NULL,
                 position            INTEGER,
                 qty                 REAL,
-                estimate_unit_price REAL
+                estimate_unit_price REAL,
+                section             INTEGER
             )
         """)
         conn.execute("""
             INSERT INTO project_items_new
-                (project_id, item_id, added, position, qty, estimate_unit_price)
-            SELECT project_id, item_id, added, position, qty, estimate_unit_price
+                (project_id, item_id, added, position, qty, estimate_unit_price, section)
+            SELECT project_id, item_id, added, position, qty, estimate_unit_price, section
             FROM project_items
         """)
         conn.execute("DROP TABLE project_items")
@@ -504,7 +520,8 @@ def batch_add_items(entries: list, project_id: str | None = None,
 
     entries: ORDERED list of dicts with optional fields:
       {label, source, avk_code, category, qty, unit, estimate_unit_price,
-       occurrences: [{seq, qty, unit_price}, ...]}   # from the parser's merge
+       section,                                       # 1|2, КД_РЛМТ only
+       occurrences: [{seq, qty, unit_price, section}, ...]}  # from the parser's merge
 
     Items already in the DB (matched by label) are NOT re-inserted, but when
     ``project_id`` is given they ARE linked to the project. The project's
@@ -526,6 +543,12 @@ def batch_add_items(entries: list, project_id: str | None = None,
     from matching.monitorable import is_monitorable
     added = linked = skipped = 0
     now = datetime.now().strftime("%Y-%m-%d")
+
+    def _sec(v):
+        try:
+            return int(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
 
     with get_conn() as conn:
         label_to_id = {
@@ -563,15 +586,16 @@ def batch_add_items(entries: list, project_id: str | None = None,
             resolved.append((item_id, e))
 
         # Build project links per mode.
-        links = []  # (item_id, position, qty, estimate_unit_price)
+        links = []  # (item_id, position, qty, estimate_unit_price, section)
         if project_id:
             if keep_duplicates:
-                expanded = []  # (seq, item_id, qty, est)
+                expanded = []  # (seq, item_id, qty, est, section)
                 for order_idx, (item_id, e) in enumerate(resolved):
                     occs = e.get("occurrences")
                     if not isinstance(occs, list) or not occs:
                         occs = [{"seq": order_idx, "qty": e.get("qty"),
-                                 "unit_price": e.get("estimate_unit_price")}]
+                                 "unit_price": e.get("estimate_unit_price"),
+                                 "section": e.get("section")}]
                     for o in occs:
                         try:
                             seq = int(o.get("seq", order_idx))
@@ -581,15 +605,17 @@ def batch_add_items(entries: list, project_id: str | None = None,
                             seq, item_id,
                             _coerce("qty", o.get("qty")),
                             _coerce("estimate_unit_price", o.get("unit_price")),
+                            _sec(o.get("section")),
                         ))
                 expanded.sort(key=lambda t: t[0])
-                links = [(iid, pos, q, ep)
-                         for pos, (_seq, iid, q, ep) in enumerate(expanded)]
+                links = [(iid, pos, q, ep, sec)
+                         for pos, (_seq, iid, q, ep, sec) in enumerate(expanded)]
             else:
                 links = [
                     (item_id, pos,
                      _coerce("qty", e.get("qty")),
-                     _coerce("estimate_unit_price", e.get("estimate_unit_price")))
+                     _coerce("estimate_unit_price", e.get("estimate_unit_price")),
+                     _sec(e.get("section")))
                     for pos, (item_id, e) in enumerate(resolved)
                 ]
 
@@ -607,9 +633,9 @@ def batch_add_items(entries: list, project_id: str | None = None,
             conn.execute("DELETE FROM project_items WHERE project_id=?", (project_id,))
             conn.executemany(
                 """INSERT INTO project_items
-                       (project_id, item_id, added, position, qty, estimate_unit_price)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                [(project_id, iid, now_iso, pos, q, ep) for iid, pos, q, ep in links],
+                       (project_id, item_id, added, position, qty, estimate_unit_price, section)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                [(project_id, iid, now_iso, pos, q, ep, sec) for iid, pos, q, ep, sec in links],
             )
             linked = len(links)
 
@@ -781,13 +807,17 @@ def get_items_for_supplier(supplier_id: str) -> list[str]:
 # ── Projects ───────────────────────────────────────────────────
 
 def create_project(name: str, description: str | None = None,
-                   avk_file: str | None = None) -> dict:
+                   avk_file: str | None = None,
+                   project_type: str = "pvr") -> dict:
     project_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    pt = (project_type or "pvr").strip().lower()
+    if pt not in ("pvr", "rlmt"):
+        pt = "pvr"
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO projects (id, name, created, description, avk_file) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO projects (id, name, created, description, avk_file, project_type) VALUES (?, ?, ?, ?, ?, ?)",
             (project_id, name.strip(), datetime.now().strftime("%Y-%m-%d"),
-             description or None, avk_file or None)
+             description or None, avk_file or None, pt)
         )
     return get_project(project_id)
 
@@ -874,7 +904,8 @@ def get_project_items(project_id: str) -> list[dict]:
         rows = conn.execute(
             """SELECT i.*, pi.position AS link_position,
                       pi.qty AS link_qty,
-                      pi.estimate_unit_price AS link_est_price
+                      pi.estimate_unit_price AS link_est_price,
+                      pi.section AS link_section
                FROM items i
                JOIN project_items pi ON pi.item_id = i.id
                WHERE pi.project_id = ?
@@ -893,6 +924,7 @@ def get_project_items(project_id: str) -> list[dict]:
         for r in rows:
             d = _row_to_dict(r, sup_map.get(r["id"], {}))
             d["position"] = r["link_position"]
+            d["section"] = r["link_section"]   # 1|2 for КД_РЛМТ rows, None otherwise
             if r["link_qty"] is not None:
                 d["qty"] = r["link_qty"]
             if r["link_est_price"] is not None:

@@ -1,16 +1,35 @@
-"""Кошторис import routes: /api/kostoris/parse, /api/kostoris/import"""
+"""Кошторис import routes: /api/kostoris/parse, /api/kostoris/import
+
+Supports two file layouts, chosen by the caller via `doc_type`:
+  'pvr'  — КД_ПВР  ("Підсумкова відомість ресурсів", АВК-5) — parsers/kostoris_parser.py
+  'rlmt' — КД_РЛМТ ("Відомість матеріальних ресурсів...")   — parsers/rlmt_parser.py
+Item-level import into the shared `items` table is identical either way;
+`doc_type` only ends up mattering for a linked project's `project_type`
+(see core/item_db.create_project) and, for 'rlmt', each row's `section`.
+"""
 
 import json
 import tempfile
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request
-from core.item_db import add_item, batch_add_items, create_project
+from core.item_db import add_item, batch_add_items, create_project, get_project
 from parsers.kostoris_parser import parse as parse_kostoris
+from parsers.rlmt_parser import parse as parse_rlmt
 
 bp = Blueprint("kostoris", __name__)
 
 LAST_IMPORT_FILE = Path("data/last_import.json")
+
+DOC_TYPES = {"pvr", "rlmt"}
+DOC_TYPE_LABELS = {"pvr": "КД_ПВР", "rlmt": "КД_РЛМТ"}
+
+
+def _doc_type_from(source, default="pvr") -> str:
+    """Normalize/validate a doc_type value from a form or JSON payload."""
+    raw = (source.get("doc_type") or default) if source else default
+    dt = str(raw).strip().lower()
+    return dt if dt in DOC_TYPES else default
 
 
 def save_last_import(data: dict):
@@ -52,6 +71,8 @@ def kostoris_parse():
     if suffix not in (".xls", ".xlsx"):
         return jsonify({"error": f"Непідтримуваний формат '{suffix}'. Потрібен .xls або .xlsx з АВК-5."}), 400
 
+    doc_type = _doc_type_from(request.form)
+
     f.seek(0, 2); size = f.tell(); f.seek(0)
     if size < 1000:
         return jsonify({"error": "Файл занадто малий. Перевірте, чи це кошторис АВК-5."}), 400
@@ -63,10 +84,13 @@ def kostoris_parse():
     tmp.close()
     f.save(tmp_path)
 
+    parse_fn = parse_rlmt if doc_type == "rlmt" else parse_kostoris
+
     try:
-        items = parse_kostoris(str(tmp_path))
+        items = parse_fn(str(tmp_path))
         if not items:
-            return jsonify({"error": "Позиції не знайдено. Перевірте, що це Підсумкова відомість ресурсів АВК-5."}), 400
+            expected = "Відомість матеріальних ресурсів КД_РЛМТ" if doc_type == "rlmt" else "Підсумкова відомість ресурсів АВК-5"
+            return jsonify({"error": f"Позиції не знайдено. Перевірте, що це {expected}."}), 400
         rows_total = sum(i.get("rows", 1) for i in items)
         result = {
             "total":      len(items),                 # unique materials
@@ -75,6 +99,7 @@ def kostoris_parse():
             "retail":     sum(1 for i in items if i["retail"]),
             "items":      items,
             "filename":   f.filename,
+            "doc_type":   doc_type,
         }
         save_last_import(result)
         return jsonify(result)
@@ -92,6 +117,9 @@ def kostoris_import():
 
     Body:
       items:            ordered rows from /api/kostoris/parse
+      doc_type:         'pvr' (default) | 'rlmt' — which layout `items` came
+                        from. Sets a NEW project's `project_type`; must MATCH
+                        an EXISTING project's type or the request is rejected.
       project_id:       link the selection to an existing project, OR
       new_project_name: create a project first and link to it
       filename:         stored as the project's avk_file (with new_project_name)
@@ -101,6 +129,7 @@ def kostoris_import():
                         false/absent → one row per material (qty summed).
     """
     payload    = request.json
+    doc_type   = _doc_type_from(payload)
     project_id = (payload.get("project_id") or "").strip() or None
     new_name   = (payload.get("new_project_name") or "").strip()
     keep_order = bool(payload.get("keep_order"))
@@ -110,8 +139,24 @@ def kostoris_import():
 
     project = None
     if new_name:
-        project = create_project(new_name, avk_file=(payload.get("filename") or None))
+        project = create_project(new_name, avk_file=(payload.get("filename") or None),
+                                  project_type=doc_type)
         project_id = project["id"]
+    elif project_id:
+        # A project mirrors ONE file — reject linking a differently-typed
+        # file into it rather than silently mixing КД_ПВР/КД_РЛМТ rows (the
+        # section-preserving export only makes sense if every synced row
+        # came from the same layout).
+        existing = get_project(project_id)
+        if not existing:
+            return jsonify({"error": "Проект не знайдено"}), 404
+        existing_type = existing.get("project_type") or "pvr"
+        if existing_type != doc_type:
+            return jsonify({"error": (
+                f"Проект «{existing['name']}» має тип {DOC_TYPE_LABELS.get(existing_type, existing_type)}, "
+                f"а обраний файл — {DOC_TYPE_LABELS.get(doc_type, doc_type)}. "
+                "Оберіть інший проект або створіть новий."
+            )}), 400
 
     entries = [
         {
@@ -122,6 +167,7 @@ def kostoris_import():
             "qty":                 e.get("qty"),
             "unit":                e.get("unit"),
             "estimate_unit_price": e.get("unit_price"),
+            "section":             e.get("section"),
             "occurrences":         e.get("occurrences"),
         }
         for e in raw if (e.get("name") or "").strip()
@@ -135,6 +181,7 @@ def kostoris_import():
         "linked":       linked,
         "skipped":      skipped,
         "keep_order":   keep_order,
+        "doc_type":     doc_type,
         "project_id":   project_id,
         "project_name": project["name"] if project else None,
     })

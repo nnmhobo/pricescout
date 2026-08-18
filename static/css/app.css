@@ -204,6 +204,9 @@
     .import-drop-icon { font-size:28px; margin-bottom:8px; }
     .import-drop-txt { font-size:13px; color:var(--ink3); }
     .import-drop-sub { font-size:11px; color:var(--border2); margin-top:4px; }
+    .doc-type-btn { padding:5px 12px; font-size:11px; font-weight:500; color:var(--ink3); background:var(--paper); border:1px solid var(--border); border-radius:var(--r); cursor:pointer; font-family:var(--sans); transition:background 0.15s, color 0.15s, border-color 0.15s; }
+    .doc-type-btn:hover { background:var(--paper2); }
+    .doc-type-btn.active { color:var(--gold); background:var(--gold-bg); border-color:var(--gold-border); font-weight:600; }
     .import-stats { display:flex; align-items:center; justify-content:center; gap:32px; padding:10px 20px; background:var(--white); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--shadow-sm); width:100%; box-sizing:border-box; }
     .import-stat { display:flex; align-items:baseline; gap:7px; }
     .import-stat-val { font-family:var(--serif); font-size:20px; font-weight:600; }
@@ -219,6 +222,7 @@
     .import-tbl tbody td { padding:8px 14px; font-size:12px; vertical-align:middle; }
     .import-tbl input[type=checkbox] { cursor:pointer; }
     .badge-retail { display:inline-block; padding:1px 6px; background:var(--teal-light); color:var(--teal); border-radius:3px; font-size:9px; font-weight:500; letter-spacing:0.06em; text-transform:uppercase; }
+    .sec-badge { display:inline-block; padding:1px 6px; background:var(--gold-bg); color:var(--gold); border:1px solid var(--gold-border); border-radius:3px; font-size:9px; font-weight:600; font-family:var(--mono); }
     .import-actions { display:flex; gap:10px; align-items:center; }
     .btn-import { padding:9px 20px; background:var(--teal); color:#fff; border:none; border-radius:var(--r-lg); font-family:var(--sans); font-size:12px; font-weight:500; cursor:pointer; transition:background 0.15s; }
     .btn-import:hover { background:#155a4a; }

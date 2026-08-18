@@ -444,14 +444,23 @@
     <div class="panel" id="panel-import">
       <div style="display:flex;align-items:center;justify-content:space-between">
         <div>
-          <div class="panel-title">Імпорт кошторису АВК-5</div>
-          <div class="panel-sub">Завантажте файл Excel (.xls/.xlsx) з АВК-5 — система витягне будівельні матеріали</div>
+          <div class="panel-title">Імпорт кошторису</div>
+          <div class="panel-sub">Завантажте файл Excel (.xls/.xlsx) — система витягне будівельні матеріали</div>
         </div>
 
       </div>
 
-      <!-- Collapsible top section (drop zone + stats only) -->
+      <!-- Collapsible top section (doc type + drop zone + stats only) -->
       <div id="import-top-section" style="display:flex;flex-direction:column;gap:10px;flex-shrink:0">
+
+      <!-- Doc type picker — which of the two supported кошторис layouts -->
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:11px;color:var(--ink3);font-weight:500">Тип файлу:</span>
+        <div id="doc-type-toggle" style="display:flex;gap:4px">
+          <button type="button" class="doc-type-btn active" data-type="pvr" onclick="setDocType('pvr')">КД_ПВР</button>
+          <button type="button" class="doc-type-btn" data-type="rlmt" onclick="setDocType('rlmt')">КД_РЛМТ</button>
+        </div>
+      </div>
 
       <!-- Drop zone -->
       <div class="import-drop" id="import-drop"
@@ -462,7 +471,7 @@
         <input type="file" id="import-file" accept=".xls,.xlsx" style="display:none" onchange="parseKostoris(this.files[0])">
         <div class="import-drop-icon">📄</div>
         <div class="import-drop-txt">Перетягніть файл або натисніть для вибору</div>
-        <div class="import-drop-sub">.xls або .xlsx — Підсумкова відомість ресурсів АВК-5</div>
+        <div class="import-drop-sub" id="import-drop-sub">.xls або .xlsx — Підсумкова відомість ресурсів АВК-5 (КД_ПВР)</div>
       </div>
 
       <!-- Stats (hidden until parsed) -->
@@ -586,6 +595,13 @@
           <div style="flex:1;display:flex;flex-direction:column;gap:6px">
             <input class="f-input" type="text" id="proj-name" placeholder="Назва проекту (напр. ЖК Сонячний, вул. Лісна 12)…" style="flex:1">
             <input class="f-input" type="text" id="proj-desc" placeholder="Опис (необов'язково)…" style="flex:1">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:10px;color:var(--ink3);font-weight:500;text-transform:uppercase;letter-spacing:0.06em">Тип:</span>
+              <div id="proj-create-type-toggle" style="display:flex;gap:4px">
+                <button type="button" class="doc-type-btn active" data-type="pvr" onclick="setProjCreateType('pvr')">КД_ПВР</button>
+                <button type="button" class="doc-type-btn" data-type="rlmt" onclick="setProjCreateType('rlmt')">КД_РЛМТ</button>
+              </div>
+            </div>
           </div>
           <button onclick="createProject()" style="padding:9px 18px;background:var(--teal);color:#fff;border:none;border-radius:var(--r);font-size:12px;font-weight:500;font-family:var(--sans);cursor:pointer;white-space:nowrap;align-self:center">Створити</button>
           <button onclick="document.getElementById('project-create-form').style.display='none'" style="padding:9px 10px;background:transparent;color:var(--ink3);border:1px solid var(--border);border-radius:var(--r);font-size:12px;cursor:pointer;align-self:center">✕</button>
