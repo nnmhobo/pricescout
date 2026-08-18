@@ -62,7 +62,11 @@ def create_proj():
     name = (data.get("name") or "").strip()
     if not name:
         return jsonify({"error": "Назва не може бути порожньою"}), 400
-    return jsonify(create_project(name, data.get("description"), data.get("avk_file")))
+    project_type = (data.get("project_type") or "pvr").strip().lower()
+    if project_type not in ("pvr", "rlmt"):
+        project_type = "pvr"
+    return jsonify(create_project(name, data.get("description"), data.get("avk_file"),
+                                   project_type=project_type))
 
 
 @bp.route("/api/projects/<project_id>", methods=["GET"])
@@ -136,7 +140,15 @@ def project_summary(project_id):
 
 @bp.route("/api/projects/<project_id>/export", methods=["GET"])
 def export_project(project_id):
-    """Export project items to Excel with estimate vs best-price comparison."""
+    """Export project items to Excel with estimate vs best-price comparison.
+
+    КД_РЛМТ projects (project_type == 'rlmt') additionally group rows under
+    their original two sections — Розділ 1 (ціноутворюючі, >=60% вартості)
+    then Розділ 2 (неціноутворюючі, <=40%) — each in its original in-file
+    order, via the `section` value core/item_db.get_project_items() attaches
+    to each item. КД_ПВР projects (and legacy projects with no type) export
+    exactly as before: one flat, position-ordered list.
+    """
     import pandas as pd
     from openpyxl.styles import Font, PatternFill, Alignment
     from core.suppliers import SUPPLIERS
@@ -149,8 +161,13 @@ def export_project(project_id):
     sup_ids = [s["id"] for s in SUPPLIERS if s.get("enabled", True)]
     sup_names = {s["id"]: s["name"] for s in SUPPLIERS}
 
-    rows = []
-    for item in items:
+    column_keys = (
+        ["Код АВК-5", "Матеріал", "Категорія", "Од.", "К-сть", "Ціна кошт. ₴", "Сума кошт. ₴"]
+        + [sup_names.get(sid, sid) for sid in sup_ids]
+        + ["Мін. ціна ₴", "Постачальник (мін.)", "Посилання", "Сума мін. ₴", "Економія %"]
+    )
+
+    def _row(item):
         sups = item.get("suppliers", {})
         row = {
             "Код АВК-5":        item.get("avk_code") or "",
@@ -177,9 +194,33 @@ def export_project(project_id):
         row["Посилання"]           = (best_entry.get("url") if best_entry else "") or ""
         row["Сума мін. ₴"]   = item.get("total_best")
         row["Економія %"]     = item.get("saving_pct")
-        rows.append(row)
+        return row
 
-    df = pd.DataFrame(rows)
+    def _section_title_row(text):
+        # Same keys as a normal row so the DataFrame stays one consistent
+        # shape — the title lives in "Матеріал", everything else blank.
+        return {col: (text if col == "Матеріал" else None) for col in column_keys}
+
+    is_rlmt = (project.get("project_type") == "rlmt")
+    rows = []
+    section_headers = []   # (0-based index into `rows`, title text)
+    if is_rlmt:
+        sec1 = [i for i in items if (i.get("section") or 2) == 1]
+        sec2 = [i for i in items if (i.get("section") or 2) != 1]
+        if sec1:
+            title = "Розділ 1. Ціноутворюючі матеріали"
+            section_headers.append((len(rows), title))
+            rows.append(_section_title_row(title))
+            rows.extend(_row(i) for i in sec1)
+        if sec2:
+            title = "Розділ 2. Неціноутворюючі матеріали"
+            section_headers.append((len(rows), title))
+            rows.append(_section_title_row(title))
+            rows.extend(_row(i) for i in sec2)
+    else:
+        rows = [_row(i) for i in items]
+
+    df = pd.DataFrame(rows, columns=column_keys)
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -194,9 +235,30 @@ def export_project(project_id):
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center")
 
-        # Column widths
+        # Section title rows (КД_РЛМТ only): merge across every column and
+        # style distinctly so "Розділ 1/2" reads as a divider, not data.
+        # NOTE: ws.merge_cells() does NOT carry a value from a non-anchor
+        # cell into the anchor (column 1) — the title must be set on the
+        # anchor cell explicitly, or it silently disappears on merge.
+        section_fill = PatternFill("solid", fgColor="e4dfd0")
+        section_font = Font(bold=True, italic=True, color="1a2b3c", size=10)
+        section_excel_rows = {idx + 2: title for idx, title in section_headers}  # +1 header row, +1 for 1-based
+        n_cols = len(column_keys)
+        for excel_row, title in section_excel_rows.items():
+            ws.merge_cells(start_row=excel_row, start_column=1, end_row=excel_row, end_column=n_cols)
+            cell = ws.cell(row=excel_row, column=1)
+            cell.value = title
+            cell.fill = section_fill
+            cell.font = section_font
+            cell.alignment = Alignment(horizontal="left", vertical="center")
+
+        # Column widths — skip section-title rows so one long merged title
+        # doesn't balloon column 1's width.
         for col_cells in ws.columns:
-            width = max(len(str(c.value or "")) for c in col_cells)
+            width = max(
+                (len(str(c.value or "")) for c in col_cells if c.row not in section_excel_rows),
+                default=0,
+            )
             ws.column_dimensions[col_cells[0].column_letter].width = min(width + 4, 45)
 
         # Highlight saving_pct column: green if positive
@@ -207,6 +269,8 @@ def export_project(project_id):
                 break
         if saving_col:
             for row_num in range(2, ws.max_row + 1):
+                if row_num in section_excel_rows:
+                    continue
                 cell = ws.cell(row=row_num, column=saving_col)
                 val = cell.value
                 if isinstance(val, (int, float)) and val > 0:

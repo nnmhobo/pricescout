@@ -20,6 +20,8 @@
   let activeItemId = null;
   let importItems   = [];
   let selectedNames = new Set();
+  let importDocType = 'pvr';    // 'pvr' | 'rlmt' — which кошторис layout the next parse/import uses
+  let projCreateType = 'pvr';   // 'pvr' | 'rlmt' — type for the Projects panel's standalone "+ Новий проект"
   let allItemsData  = [];
   let monitorQueue  = [];
   let monitorDone   = 0;
@@ -368,6 +370,8 @@
     if (!d || !d.items || !d.items.length) return;
     importItems = d.items;
     importFilename = d.filename || '';
+    importDocType = (d.doc_type === 'rlmt') ? 'rlmt' : 'pvr';
+    _setToggleActive('doc-type-toggle', importDocType);
     selectedNames = new Set(d.items.map(i => i.name));
     document.getElementById('imp-total').textContent  = d.total;
     _showMergedNote(d);
@@ -877,12 +881,71 @@
     }
   }
 
+  // ── Doc type picker (КД_ПВР / КД_РЛМТ) ─────────────────────────
+
+  function _setToggleActive(containerId, type) {
+    const box = document.getElementById(containerId);
+    if (!box) return;
+    box.querySelectorAll('.doc-type-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.type === type);
+    });
+  }
+
+  const DOC_TYPE_SUB_TEXT = {
+    pvr:  '.xls або .xlsx — Підсумкова відомість ресурсів АВК-5 (КД_ПВР)',
+    rlmt: '.xls або .xlsx — Відомість матеріальних ресурсів (КД_РЛМТ, 2 розділи)',
+  };
+
+  const DOC_TYPE_LABELS = { pvr: 'ПВР', rlmt: 'РЛМТ' };
+
+  function _projTypeBadge(p) {
+    const t = (p.project_type === 'rlmt') ? 'rlmt' : 'pvr';
+    const cls = t === 'rlmt' ? 'pill-gold' : 'pill-teal';
+    return `<span class="pill ${cls}" style="padding:2px 8px;font-size:10px" title="Тип проекту">${DOC_TYPE_LABELS[t]}</span>`;
+  }
+
+  function setDocType(t) {
+    if (t !== 'pvr' && t !== 'rlmt') return;
+    importDocType = t;
+    _setToggleActive('doc-type-toggle', t);
+    const sub = document.getElementById('import-drop-sub');
+    if (sub) sub.textContent = DOC_TYPE_SUB_TEXT[t];
+    // A file was already parsed under the OLD type — its preview no longer
+    // matches what's now selected, so reset back to the pre-parse state
+    // rather than risk importing a stale preview under a mismatched type.
+    if (importItems.length > 0) {
+      importItems = [];
+      selectedNames = new Set();
+      importFilename = '';
+      document.getElementById('import-stats-row').style.display = 'none';
+      document.getElementById('import-table-wrap').style.display = 'none';
+      const drop = document.getElementById('import-drop');
+      drop.querySelector('.import-drop-txt').textContent = 'Перетягніть файл або натисніть для вибору';
+      drop.querySelector('.import-drop-txt').style.color = '';
+      drop.querySelector('.import-drop-icon').textContent = '📄';
+      drop.querySelector('.import-drop-icon').style.display = '';
+      drop.querySelector('.import-drop-sub').style.display = '';
+      drop.style.padding = '';
+      drop.style.borderColor = '';
+      const fileInput = document.getElementById('import-file');
+      if (fileInput) fileInput.value = '';
+    }
+    populateImportProjectSelect();   // re-filter the project dropdown for the new type
+  }
+
+  function setProjCreateType(t) {
+    if (t !== 'pvr' && t !== 'rlmt') return;
+    projCreateType = t;
+    _setToggleActive('proj-create-type-toggle', t);
+  }
+
   function parseKostoris(file) {
     if (!file) return;
     const drop = document.getElementById('import-drop');
     drop.querySelector('.import-drop-txt').textContent = 'Обробляємо ' + file.name + '…';
     const fd = new FormData();
     fd.append('file', file);
+    fd.append('doc_type', importDocType);
     fetch('/api/kostoris/parse', { method: 'POST', body: fd })
       .then(r => r.json())
       .then(d => {
@@ -961,7 +1024,7 @@
     tbody.innerHTML = filtered.map(i => `
       <tr>
         <td><input type="checkbox" ${selectedNames.has(i.name)?'checked':''} onchange="toggleItem(this,'${esc(i.name)}')" /></td>
-        <td>${esc(i.name)}</td>
+        <td>${esc(i.name)}${i.section ? ` <span class="sec-badge" title="Розділ ${i.section} у файлі КД_РЛМТ">§${i.section}</span>` : ''}</td>
         <td style="font-family:var(--mono);font-size:10px;color:var(--ink3)">${esc(i.code)}</td>
         <td style="font-family:var(--mono);font-size:11px">${esc(i.unit||'')}</td>
         <td style="font-family:var(--mono);font-size:11px">${i.qty||''}${i.rows > 1 ? ` <span style="font-size:9px;padding:0 4px;background:var(--paper2);color:var(--ink3);border-radius:3px" title="Кількість підсумовано з ${i.rows} рядків файлу">×${i.rows}</span>` : ''}</td>
@@ -1020,11 +1083,12 @@
         qty:         i.qty,
         unit:        i.unit,
         unit_price:  i.unit_price,
+        section:     i.section,       // РОЗДІЛ 1/2 for КД_РЛМТ rows, undefined otherwise
         occurrences: i.occurrences,   // per-source-row data for keep-order mode
       }));
     const projectSel = document.getElementById('import-project-select');
     const selVal = projectSel ? projectSel.value : '';
-    const body = { items, filename: importFilename || null };
+    const body = { items, filename: importFilename || null, doc_type: importDocType };
 
     if (toProject) {
       if (selVal === '__new__') {
@@ -2093,9 +2157,12 @@
     const sel = document.getElementById('import-project-select');
     if (!sel) return;
     const cur = sel.value;
+    // Only projects matching the selected import file type — a project mirrors
+    // ONE file layout, so mixing types would break the section-preserving export.
+    const eligible = allProjects.filter(p => (p.project_type || 'pvr') === importDocType);
     sel.innerHTML = '<option value="">— без проекту —</option>' +
       '<option value="__new__"' + (cur === '__new__' ? ' selected' : '') + '>+ Новий проект…</option>' +
-      allProjects.map(p => `<option value="${esc(p.id)}" ${p.id===cur?'selected':''}>${esc(p.name)} (${p.item_count} поз.)</option>`).join('');
+      eligible.map(p => `<option value="${esc(p.id)}" ${p.id===cur?'selected':''}>${esc(p.name)} (${p.item_count} поз.)</option>`).join('');
   }
 
   function onImportProjectChange() {
@@ -2124,7 +2191,7 @@
     const p = await fetch('/api/projects', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ name, description: desc || null })
+      body: JSON.stringify({ name, description: desc || null, project_type: projCreateType })
     }).then(r => r.json());
     if (p.error) { alert(p.error); return; }
     document.getElementById('proj-name').value = '';
@@ -2156,7 +2223,10 @@
            onclick="viewProject('${p.id}')">
         <div style="width:42px;height:42px;background:var(--teal-light);border-radius:var(--r-lg);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">📋</div>
         <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:600;color:var(--ink)">${esc(p.name)}</div>
+          <div style="display:flex;align-items:center;gap:7px">
+            <div style="font-size:13px;font-weight:600;color:var(--ink)">${esc(p.name)}</div>
+            ${_projTypeBadge(p)}
+          </div>
           ${p.description ? `<div style="font-size:11px;color:var(--ink3);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.description)}</div>` : ''}
           <div style="display:flex;align-items:center;gap:10px;margin-top:5px">
             <span style="font-size:10px;color:var(--ink3)">📅 ${esc(p.created)}</span>
@@ -2206,7 +2276,10 @@
         <button onclick="renderProjectsList();document.getElementById('project-list-wrap').style.display='flex';document.getElementById('project-detail-wrap').style.display='none'"
           style="padding:6px 12px;background:transparent;color:var(--ink3);border:1px solid var(--border);border-radius:var(--r);font-size:11px;cursor:pointer">← Назад</button>
         <div style="flex:1">
-          <div style="font-size:15px;font-weight:600">${esc(project.name)}</div>
+          <div style="display:flex;align-items:center;gap:7px">
+            <div style="font-size:15px;font-weight:600">${esc(project.name)}</div>
+            ${_projTypeBadge(project)}
+          </div>
           ${project.description ? `<div style="font-size:11px;color:var(--ink3)">${esc(project.description)}</div>` : ''}
         </div>
         <button onclick="_queueProjectItems('${projectId}')"
