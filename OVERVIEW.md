@@ -27,6 +27,7 @@ pricescout/
 ├── README.md               # The single README (English): overview, features, setup, user guide
 ├── ЯК ЗАПУСТИТИ.txt        # Ukrainian quick start for the customer (UTF-8 with BOM, CRLF)
 ├── OVERVIEW.md             # This file
+├── LICENSE                 # All rights reserved — source-available for portfolio review only
 ├── START.bat               # Silent launcher → `pythonw setup_gui.py` (console only if Python missing)
 ├── setup_gui.py            # tkinter installer/launcher window — STDLIB ONLY (runs on system Python before the venv exists)
 ├── requirements.txt        # flask, scrapling[fetchers], lxml, xlrd, pandas, openpyxl, python-dotenv, rapidfuzz, requests
