@@ -1,6 +1,7 @@
 """
-База даних матеріалів — SQLite backend.
-Замінює items.json. Свіжий старт — items.json більше не потрібен.
+База даних PriceScout — SQLite backend (pricescout.db, WAL).
+Усі запити до БД та ідемпотентні міграції схеми (_migrate) — тут.
+Схема описана в OVERVIEW.md §3.
 """
 
 import sqlite3
@@ -538,7 +539,14 @@ def batch_add_items(entries: list, project_id: str | None = None,
     Returns (added, linked, skipped):
       added   — new items inserted into the shared items table
       linked  — project links written (0 when project_id is None)
-      skipped — entries with an empty or in-file-duplicated label
+      skipped — entries with an empty or in-file-duplicated label, or a new
+                item that could not be stored (never linked to a wrong id)
+
+    New item ids are ``%Y%m%d%H%M%S%f`` + a 6-digit counter, checked against
+    the ids already in the table; after the insert every new entry is
+    re-resolved BY LABEL, so a project link can never point at a different
+    item (the old second-resolution ids could collide across two imports in
+    the same second, and INSERT OR IGNORE then linked the wrong item).
     """
     from matching.monitorable import is_monitorable
     added = linked = skipped = 0
@@ -556,10 +564,23 @@ def batch_add_items(entries: list, project_id: str | None = None,
             for r in conn.execute("SELECT id, label FROM items").fetchall()
         }
 
+        existing_ids = set(label_to_id.values())
+        base_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
+        id_seq = 0
+
+        def _new_id() -> str:
+            nonlocal id_seq
+            while True:
+                cand = f"{base_id}{id_seq:06d}"
+                id_seq += 1
+                if cand not in existing_ids:
+                    existing_ids.add(cand)
+                    return cand
+
         rows = []
         resolved = []  # (item_id, entry) — unique by label, in entry order
         seen_in_file: set = set()
-        base_id = datetime.now().strftime("%Y%m%d%H%M%S")
+        new_labels: set = set()
         for idx, e in enumerate(entries):
             label    = (e.get("label") or "").strip()
             avk_code = (e.get("avk_code") or "").strip() or None
@@ -576,14 +597,47 @@ def batch_add_items(entries: list, project_id: str | None = None,
 
             item_id = label_to_id.get(label)
             if item_id is None:
-                item_id = f"{base_id}{idx:06d}"
+                item_id = _new_id()
                 mon = 1 if is_monitorable(label) else 0
                 rows.append((item_id, label, now, source, avk_code, category,
                              qty, unit, est_up, mon, None))
                 label_to_id[label] = item_id
-                added += 1
+                new_labels.add(label)
 
             resolved.append((item_id, e))
+
+        if rows:
+            before = conn.total_changes
+            conn.executemany(
+                """INSERT OR IGNORE INTO items
+                   (id, label, created, source, avk_code, category,
+                    qty, unit, estimate_unit_price, monitorable, project_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
+            added = conn.total_changes - before
+            # Re-resolve new entries by label: link to the id actually stored
+            # for that label (covers a concurrent insert of the same label);
+            # an entry whose row was not stored at all is skipped, not linked.
+            stored: dict = {}
+            labels = list(new_labels)
+            for i in range(0, len(labels), 500):
+                chunk = labels[i:i + 500]
+                ph = ",".join("?" * len(chunk))
+                for r in conn.execute(
+                    f"SELECT id, label FROM items WHERE label IN ({ph})", chunk
+                ).fetchall():
+                    stored[r["label"]] = r["id"]
+            fixed = []
+            for item_id, e in resolved:
+                label = (e.get("label") or "").strip()
+                if label in new_labels:
+                    if label not in stored:
+                        skipped += 1
+                        continue
+                    item_id = stored[label]
+                fixed.append((item_id, e))
+            resolved = fixed
 
         # Build project links per mode.
         links = []  # (item_id, position, qty, estimate_unit_price, section)
@@ -619,14 +673,6 @@ def batch_add_items(entries: list, project_id: str | None = None,
                     for pos, (item_id, e) in enumerate(resolved)
                 ]
 
-        if rows:
-            conn.executemany(
-                """INSERT OR IGNORE INTO items
-                   (id, label, created, source, avk_code, category,
-                    qty, unit, estimate_unit_price, monitorable, project_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                rows,
-            )
         if project_id and links:
             # Sync-to-file: the project mirrors the imported selection.
             now_iso = datetime.now().isoformat()

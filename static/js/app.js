@@ -825,7 +825,8 @@
       const convNote = d.converted_from_xls ? ' (перетворено у .xlsx)' : '';
       if (res) {
         res.style.color = 'var(--teal)';
-        res.textContent = `✓ Посилань додано: ${d.filled} з ${d.rows} позицій${dupNote}${convNote}`;
+        const layoutNote = d.layout === 'rlmt' ? ' · КД_РЛМТ' : '';
+        res.textContent = `✓ Посилань додано: ${d.filled} з ${d.rows} позицій${dupNote}${convNote}${layoutNote}`;
       }
       // Auto-download the produced file + refresh the list.
       const a = document.createElement('a');

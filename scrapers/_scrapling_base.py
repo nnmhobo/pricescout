@@ -2,7 +2,9 @@
 Shared Scrapling helpers for PriceScout site scrapers.
 
 All Scrapling-facing code lives here so individual scrapers only deal with
-CSS selectors + lightweight picking logic. No Claude, no Playwright.
+CSS selectors + lightweight picking logic. Fetching goes through Scrapling:
+plain HTTP (FETCH_MODE_FAST) or a Patchright / camoufox browser
+(FETCH_MODE_DYNAMIC / FETCH_MODE_STEALTH) for JS-heavy or protected sites.
 """
 
 from __future__ import annotations

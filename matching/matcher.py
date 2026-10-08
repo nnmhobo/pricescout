@@ -12,7 +12,7 @@ Provides robust product name matching that handles:
 
 Public API:
   - normalize_text(text)           -> str
-  - calculate_match_score(query, candidate) -> float  (0..100)
+  - calculate_match_score(query, candidate) -> float  (0..120: base 0..100 + bonuses)
   - find_best_match(query, candidates, ...) -> MatchResult | None
 """
 
@@ -160,7 +160,7 @@ _W_TOKEN_SET   = 0.35
 # Bonus for exact key-token containment
 _EXACT_TOKEN_BONUS = 15.0
 
-# Minimum score threshold (0-100)
+# Minimum score threshold (scores range 0..120)
 DEFAULT_THRESHOLD = 50
 
 # Synonyms for retail-construction terms — symmetric. If any synonym of a
@@ -227,7 +227,7 @@ def _expand_synonyms(tokens: list[str]) -> set[str]:
 
 def calculate_match_score(query: str, candidate: str) -> float:
     """
-    Calculate a combined fuzzy match score (0-100) between a search
+    Calculate a combined fuzzy match score (0-120) between a search
     query and a candidate product title.
 
     Uses:
@@ -237,7 +237,7 @@ def calculate_match_score(query: str, candidate: str) -> float:
     - Exact key-token bonus
     - Cross-language transliteration matching
 
-    Returns a float 0..100+  (can exceed 100 due to bonuses).
+    Returns a float 0..120 (base up to 100 + bonuses, capped at 120).
     """
     if not query or not candidate:
         return 0.0
@@ -459,7 +459,7 @@ def _verify_key_tokens(query: str, candidate: str, min_key_overlap: float = 0.4)
 class MatchResult:
     """Result of find_best_match()."""
     name: str              # Original (unnormalized) candidate name
-    score: float           # Combined match score (0-100+)
+    score: float           # Combined match score (0-120)
     index: int             # Index in the original candidates list
     all_scores: list[tuple[float, str]]  # Top candidates: [(score, name), ...]
 
@@ -528,7 +528,7 @@ def find_best_match(
     Args:
         query:      The search query (product name being searched for).
         candidates: List of candidate product names to match against.
-        threshold:  Minimum score to accept a match (0-100).
+        threshold:  Minimum score to accept a match (scores range 0-120).
         top_n:      Number of top candidates to include in debug output.
         log_fn:     Optional logging function log_fn(msg: str).
 
