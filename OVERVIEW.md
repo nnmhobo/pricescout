@@ -479,9 +479,9 @@ find_best_match(query, candidates, ...)  # first of find_top_matches or None
 4. Marketplace tail: `prom`/`olx` (if enabled) are **always appended after** the specialist list — including for empty categories, where they are the only suppliers tried.
 5. Everything is intersected with the enabled supplier set, preserving order.
 
-Groups: `GENERAL_SUPPLIERS` (9 retail: epicentr, ars, buddvir, kub, venbud, m2, vista, megatrade, budia), `MARKETPLACE_SUPPLIERS` (prom, olx), `HVAC_SUPPLIERS` (teplodim), `ELECTRICAL_SUPPLIERS` (epicentr, kub, m2), `PLUMBING_SUPPLIERS` (6), `INSULATION_SUPPLIERS` (8). ⚠ `HARDWARE_SUPPLIERS` is defined but not referenced by `CATEGORY_ROUTING` — dead config.
+Groups: `GENERAL_SUPPLIERS` (10 retail: epicentr, ars, buddvir, kub, venbud, budpostach, m2, vista, megatrade, budia), `MARKETPLACE_SUPPLIERS` (prom, olx), `HVAC_SUPPLIERS` (teplodim), `ELECTRICAL_SUPPLIERS` (epicentr, kub, m2), `PLUMBING_SUPPLIERS` (6), `INSULATION_SUPPLIERS` (8). ⚠ `HARDWARE_SUPPLIERS` is defined but not referenced by `CATEGORY_ROUTING` — dead config.
 
-⚠ **Будпостач (`budpostach`) is unreachable:** it is registered and has a working scraper, but appears only in the unused `HARDWARE_SUPPLIERS`, never in `GENERAL_SUPPLIERS`, `CATEGORY_ROUTING` or the label-override path — so `get_suppliers_for_item()` never returns it (normal and discovery runs alike). Its sidebar toggle has no effect. Known issue #15.
+⚠ **Every registered supplier must be reachable by some rule.** Until 2026-10 `budpostach` sat only in the unused `HARDWARE_SUPPLIERS`, so Будпостач was never queried (its sidebar toggle had no effect); it is now in `GENERAL_SUPPLIERS`. `tests/test_category_routing.py` fails if any registry id becomes unreachable again.
 
 The parser's fallback category `Матеріали будівельні` (unknown codes) is not a `CATEGORY_ROUTING` key (that key is `Будівельні матеріали`), so such items take the `DEFAULT_SUPPLIERS` path — same list, by design or by accident.
 
@@ -519,7 +519,7 @@ SUPPLIER_REGISTRY: list[tuple[id, name, url, module, enabled]]  # 13 entries
 SUPPLIERS = build_suppliers()   # module-level, built at import
 ```
 
-`build_suppliers()` imports each scraper module; a failed import prints a warning and **skips that supplier** (no crash). `enabled=True` means "available to toggle in the UI"; the template renders every enabled toggle checked and the frontend then restores the user's saved selection. Marketplaces (prom, olx) were added 2026-05-18. ⚠ Being registered does not mean being queried — routing (§8) decides; `budpostach` is currently never routed.
+`build_suppliers()` imports each scraper module; a failed import prints a warning and **skips that supplier** (no crash). `enabled=True` means "available to toggle in the UI"; the template renders every enabled toggle checked and the frontend then restores the user's saved selection. Marketplaces (prom, olx) were added 2026-05-18. ⚠ Being registered does not mean being queried — routing (§8) decides which suppliers each item gets.
 
 **To add a supplier:** create `scrapers/<id>.py` with the `scrape()` contract (usually just a `SiteConfig` + `search_and_extract`/`text_based_extract` wrapper — see `vista.py` for the minimal pattern), add one registry tuple, optionally add routing in `category_routing.py`.
 
@@ -694,12 +694,12 @@ For CRLF files: normalize `\r\n`→`\n` before replacing, restore after.
 
 **Dead / legacy:**
 
-13. `HARDWARE_SUPPLIERS` in category_routing.py is unused (see #15 for the consequence).
+13. `HARDWARE_SUPPLIERS` in category_routing.py is unused.
 14. `items.project_id` column is legacy; junction table `project_items` is authoritative.
 
 **Found 2026-10-08 (documented, not yet fixed):**
 
-15. ⚠ **Будпостач is never queried** — `budpostach` exists only in the unused `HARDWARE_SUPPLIERS`, so routing never returns it (§8). Fix: add it to the relevant routing lists (e.g. `GENERAL_SUPPLIERS`), or wire `HARDWARE_SUPPLIERS` into `CATEGORY_ROUTING`.
+15. ✅ *Fixed 2026-10:* Будпостач was never queried (only in the unused `HARDWARE_SUPPLIERS`) — now in `GENERAL_SUPPLIERS`, guarded by `tests/test_category_routing.py`.
 16. ⚠ **Item-ID collision in `batch_add_items()`** — IDs are `"%Y%m%d%H%M%S" + idx`; two imports within the same second can generate an ID that already exists. `INSERT OR IGNORE` then skips the new item while the project link still uses that ID, so it points at a different, older item. Fix: microsecond timestamp or `uuid4`, plus resolving the inserted ID after insert.
 17. ⚠ **URL enrichment ignores the КД_РЛМТ layout** — `_enrich_worksheet()` reads name from column C, which is «Варіант ціни» in КД_РЛМТ; such rows match by code only. Fix: detect the layout (Розділ markers) or take `doc_type` like the import routes.
 18. Unused code: JS `addAllToQueue()`, `origShowPanel`, `toggleAll()`; Python `get_items_for_supplier()`, `get_item_projects()`, `get_price_history_bulk()` (`item_db.py`).
@@ -723,6 +723,7 @@ Run: `python -m pytest tests/ -v` — no network, pure logic. ⚠ `test_price_pa
 | `test_safe_export_path.py` | export path traversal prevention |
 | `test_session_cache.py` | runner `_session_cache`: key includes the supplier set; not populated in discovery mode |
 | `test_excel_medals.py` | top-3 medal rank assignment |
+| `test_category_routing.py` | every registered supplier is reachable by routing; disabled suppliers never returned |
 
 ---
 

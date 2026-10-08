@@ -110,7 +110,7 @@ A detailed technical reference (database schema, every API endpoint, runner flow
 
 Adding a supplier is usually one `SiteConfig` (search URL + CSS selectors) in a new `scrapers/<id>.py` and one line in `core/suppliers.py`.
 
-> **Routing note:** which suppliers are asked depends on the material's category (`matching/category_routing.py`). ТеплоДiм is used for heating/ventilation categories; Prom.ua and OLX are appended after the retailers. Будпостач is currently not included in any active routing list, so it is never queried — see *Known issues* in `OVERVIEW.md`.
+> **Routing note:** which suppliers are asked depends on the material's category (`matching/category_routing.py`). ТеплоДiм is used for heating/ventilation categories; Prom.ua and OLX are appended after the retailers. A test (`tests/test_category_routing.py`) checks that every registered supplier is reachable by routing.
 
 ---
 
@@ -241,7 +241,7 @@ Fills the optional shorter search query (`items.search_label`) for long estimate
 python -m pytest tests/ -v
 ```
 
-The tests cover pure logic with no network: fuzzy matching, price parsing, query simplification and variations, result sorting and manual overrides, batch controls, the run session cache, Excel medal ranking, and the export path-traversal guard. `tests/test_price_parsing.py` imports the scraping base and needs `scrapling` installed.
+The tests cover pure logic with no network: supplier routing reachability, fuzzy matching, price parsing, query simplification and variations, result sorting and manual overrides, batch controls, the run session cache, Excel medal ranking, and the export path-traversal guard. `tests/test_price_parsing.py` imports the scraping base and needs `scrapling` installed.
 
 `.github/workflows/notify-release-mail.yml`: every push to `main` creates a GitHub Release (`v<run number>`) with a zip of the code and emails the download link (SMTP credentials and the recipient come from repository secrets/variables).
 

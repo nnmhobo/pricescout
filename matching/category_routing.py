@@ -16,15 +16,17 @@ Routing logic (see get_suppliers_for_item):
 - Marketplaces (prom, olx) are appended after the specialists when enabled
 - Always intersected with the suppliers enabled in the UI
 
-NOTE: 'budpostach' appears only in HARDWARE_SUPPLIERS, which no rule uses,
-so Будпостач is currently never routed (OVERVIEW.md, Known issue #15).
+Every registered supplier must be reachable through at least one rule —
+tests/test_category_routing.py guards this (a supplier that sits only in an
+unused list is silently never queried).
 """
 
 from matching.monitorable import MONITOR_ALL
 
 # Suppliers that carry GENERAL building materials (dry mixes, insulation, paint, fasteners)
 GENERAL_SUPPLIERS = [
-    "epicentr", "ars", "buddvir", "kub", "venbud", "m2", "vista", "megatrade", "budia"
+    "epicentr", "ars", "buddvir", "kub", "venbud", "budpostach", "m2", "vista",
+    "megatrade", "budia",
 ]
 
 # Marketplace aggregators — broad coverage, lower data quality. Listed after
