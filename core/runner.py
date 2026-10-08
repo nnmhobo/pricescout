@@ -1,25 +1,33 @@
 """
 PriceScout — scrape runner on Scrapling.
 
-Replaces the old Playwright + Claude pipeline with synchronous per-site
-scrapers that run on Scrapling. Items are fanned out through a
-ThreadPoolExecutor so the Flask UI keeps responding while a batch runs.
+Runs synchronous per-site scrapers (Scrapling) over a queue of items in a
+background thread: items are fanned out through an outer ThreadPoolExecutor,
+suppliers per item through an inner one, so the Flask UI keeps responding
+while a batch runs.
 
 Public entrypoints (called from routes/scrape.py):
   - start_scrape(item_id, active_supplier_ids)
-  - start_batch(item_ids, active_supplier_ids, parallel_items=None, limit=None)
+  - start_batch(item_ids, active_supplier_ids, parallel_items=None, limit=None,
+                discovery_mode=False, project_id=None, run_label=None,
+                single_price=False, best_price=False, supplier_order=None,
+                fill_missing=False)
 
-start_batch accepts two optional knobs exposed to the UI:
+start_batch knobs exposed to the UI:
   - parallel_items: how many items to scrape concurrently (1..MAX_PARALLEL_ITEMS).
-    Defaults to MAX_PARALLEL_ITEMS. Lets the user pick a sequential (1) or a
-    light async mode (2-3) without having to restart the app.
+    Missing/invalid -> DEFAULT_PARALLEL_ITEMS (min(MAX_PARALLEL_ITEMS, 5)).
   - limit: cap on how many items are pulled from the head of the queue.
-    Defaults to no limit (all items). Used by the UI to scrape the first N
-    items instead of the whole queue.
+    Defaults to no limit (all items).
+  - project_id: per-project quantities + results kept in the project's file order.
+  - single_price / best_price / supplier_order: one price per item — first hit in
+    the given supplier priority, or the cheapest of all routed suppliers.
+  - fill_missing: zero-price stub row for items without any result.
+  - discovery_mode: ignore the not-found cache and the session cache.
 
 State contracts preserved:
   - core.state keys: running, stop_requested, log, results, last_run,
-    error, label, parallel_items, limit, total_items
+    error, label, parallel_items, limit, total_items (+ runtime-only:
+    batch_started_at, project_id, run_options)
   - item_states[item_id]: {log, results, done, error}
 """
 

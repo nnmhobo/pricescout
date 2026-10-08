@@ -1,4 +1,5 @@
-"""Scrape routes: /api/scrape, /api/scrape/batch, /api/stop, /api/status, /api/results"""
+"""Scrape routes: /api/scrape, /api/scrape/batch, /api/stop, /api/status,
+/api/discover, /api/config, /api/results, PATCH /api/results/<item_id>/<supplier_id>"""
 
 from flask import Blueprint, jsonify, request
 from core.core import state, normalize_label

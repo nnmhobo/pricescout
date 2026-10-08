@@ -146,8 +146,8 @@
       <div style="padding:12px 16px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);display:flex;flex-direction:column;gap:8px">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Додати посилання у кошторис</div>
         <div style="font-size:12px;color:var(--ink2)">
-          Завантажте файл АВК-5 (.xls/.xlsx) — система додасть колонку з відомими посиланнями
-          (пошук за шифром, потім за назвою). Посилання беруться з результатів моніторингу.
+          Завантажте кошторис (.xls/.xlsx) — система додасть колонку з відомими посиланнями
+          (пошук за шифром, потім за назвою; для КД_РЛМТ — лише за шифром). Посилання беруться з результатів моніторингу.
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <input type="file" id="urls-file" accept=".xls,.xlsx"
@@ -269,7 +269,7 @@
               </div>
             </div>
             <div style="display:flex;flex-direction:column;gap:2px;padding:5px 10px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);min-width:108px"
-                 title="Скільки товарів парсити одночасно. Кожен товар сам по собі опитує постачальників у 3 потоки.">
+                 title="Скільки матеріалів шукати одночасно. Кожен матеріал ще й опитує своїх постачальників паралельно.">
               <span style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3)">Паралельно</span>
               <select id="batch-parallel" onchange="onBatchParallelChange()"
                       style="border:none;background:transparent;font-family:var(--sans);font-size:12px;outline:none;cursor:pointer;padding:0">

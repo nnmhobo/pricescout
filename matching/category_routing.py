@@ -1,18 +1,23 @@
 """
 Category-to-supplier routing for PriceScout.
 
-Maps АВК-5 categories to the supplier IDs that realistically carry those items.
-This avoids wasting Claude API calls sending electrical cable queries to Епіцентр К
-or HVAC equipment queries to Вен Буд.
+Maps кошторис categories (derived from resource codes, see
+parsers/category_codes.py) to the supplier IDs that realistically carry those
+items, so a run doesn't waste requests and time sending cable queries to
+general builders or boiler queries to a dry-mix shop.
 
-Routing logic:
-- General building materials (dry mixes, insulation, drywall, paint) → all retail suppliers
-- Plumbing/pipes → retail + some specialized
-- Electrical/cables/automation → skip general builders, use only if supplier has electrical section
-- HVAC/heating equipment → skip general builders entirely (no stock)
-- Windows/doors → Епіцентр К only (largest assortment)
+Routing logic (see get_suppliers_for_item):
+- Label contains a RETAIL_OVERRIDE_KW keyword → GENERAL_SUPPLIERS
+- Otherwise CATEGORY_ROUTING[category] (unknown category → DEFAULT_SUPPLIERS):
+  general materials → retail chains; plumbing / electrical / insulation /
+  windows-doors → the subset with that section; heating & ventilation →
+  ТеплоДiм (HVAC_SUPPLIERS); automation, energy, cranes … → [] (skipped,
+  unless MONITOR_ALL_ITEMS=1 → DEFAULT_SUPPLIERS)
+- Marketplaces (prom, olx) are appended after the specialists when enabled
+- Always intersected with the suppliers enabled in the UI
 
-Supplier IDs: epicentr, ars, buddvir, kub, venbud, budpostach, m2, vista, megatrade, budia
+NOTE: 'budpostach' appears only in HARDWARE_SUPPLIERS, which no rule uses,
+so Будпостач is currently never routed (OVERVIEW.md, Known issue #15).
 """
 
 from matching.monitorable import MONITOR_ALL

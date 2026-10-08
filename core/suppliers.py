@@ -1,11 +1,14 @@
 """Конфігурація постачальників PriceScout.
 
-Всі 10 постачальників портовані на Scrapling (без Claude, без Playwright).
+13 постачальників; ціни збираються через Scrapling (звичайний HTTP або
+браузер Patchright/camoufox для JS-сайтів і захисту від ботів). Які саме
+постачальники опитуються для матеріалу, вирішує matching/category_routing.py.
 
 Як додати нового постачальника:
   1. Створити файл scrapers/<id>.py з функцією scrape(supplier, label, log, saved_url=None)
-  2. Додати запис у SUPPLIER_REGISTRY нижче (id, name, url, module)
-  3. (Опціонально) Додати маршрутизацію в category_routing.py якщо не всі категорії підтримуються
+  2. Додати запис у SUPPLIER_REGISTRY нижче (id, name, url, module, enabled)
+  3. Додати id у потрібні списки category_routing.py — постачальника, якого
+     немає в жодному робочому списку маршрутизації, НЕ опитують ніколи
 """
 import importlib
 from typing import Callable, Optional

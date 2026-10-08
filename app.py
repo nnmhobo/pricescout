@@ -1,4 +1,4 @@
-"""PriceScout — Flask app factory."""
+"""PriceScout — Flask app: module-level `app`, blueprint registration, DB init at import."""
 import os
 import sys
 import time

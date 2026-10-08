@@ -1,4 +1,5 @@
-"""Item database routes: /api/items, /api/availability"""
+"""Item database routes: /api/items (CRUD), /api/availability,
+/api/availability/coverage, /api/items/<item_id>/price-history"""
 
 from flask import Blueprint, jsonify, request
 from core.core import normalize_label

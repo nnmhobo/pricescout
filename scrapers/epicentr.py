@@ -10,7 +10,7 @@ Flow:
   4. SKU lives on the detail page (`[itemprop="sku"]`), so we fetch the
      chosen card's product URL once for a clean SKU.
 
-No Playwright, no Claude.
+Plain HTTP fetch (FETCH_MODE_FAST) — no browser needed.
 """
 
 from __future__ import annotations

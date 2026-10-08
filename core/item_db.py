@@ -1,6 +1,7 @@
 """
-База даних матеріалів — SQLite backend.
-Замінює items.json. Свіжий старт — items.json більше не потрібен.
+База даних PriceScout — SQLite backend (pricescout.db, WAL).
+Усі запити до БД та ідемпотентні міграції схеми (_migrate) — тут.
+Схема описана в OVERVIEW.md §3.
 """
 
 import sqlite3
