@@ -6,6 +6,8 @@ PriceScout is a local web app that takes a Ukrainian construction cost estimate 
 
 > Українською: коротка інструкція для користувача — у файлі [`ЯК ЗАПУСТИТИ.txt`](ЯК%20ЗАПУСТИТИ.txt).
 
+> **Portfolio project.** Built as a commissioned project and published with the client's permission. Source-available for review only — all rights reserved, see [License & disclaimer](#license--disclaimer).
+
 ---
 
 ## Contents
@@ -19,6 +21,7 @@ PriceScout is a local web app that takes a Ukrainian construction cost estimate 
 - [Command-line tools](#command-line-tools)
 - [Development](#development)
 - [Troubleshooting](#troubleshooting)
+- [License & disclaimer](#license--disclaimer)
 
 ---
 
@@ -262,3 +265,11 @@ Before changing behaviour, read [`OVERVIEW.md`](OVERVIEW.md) — it lists conven
 **Prices are not found at all** — delete `.venv\.setup_done` and run `START.bat`; the components (including the browser) are reinstalled.
 
 **A run seems stuck** — if the log hasn't changed for several minutes, press «◼ Зупинити»; if that doesn't help, close the PriceScout window and start `START.bat` again.
+
+---
+
+## License & disclaimer
+
+**License.** Copyright © 2026 nnmhobo. All rights reserved. The code is published for portfolio and evaluation purposes only: you may read it, but copying, modifying, redistributing or using it requires prior written permission. See [`LICENSE`](LICENSE).
+
+**Web scraping.** PriceScout reads publicly available product listings (names, prices, links) from third-party websites. It is not affiliated with, endorsed by or connected to any of the listed suppliers or marketplaces; their names and trademarks belong to their respective owners. Anyone running the software is solely responsible for complying with each website's terms of use, robots rules and applicable law, and for keeping request volumes reasonable (see `MAX_PARALLEL_ITEMS` / `MAX_INNER_WORKERS`). No scraped data is distributed with this repository.
