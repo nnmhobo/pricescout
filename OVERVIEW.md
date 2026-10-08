@@ -279,7 +279,7 @@ All routes are Flask Blueprints registered in `app.py`. All return JSON unless n
 | GET | `/api/exports` | List saved exports: `[{filename, type, size_kb, created}]`, newest first. `type` ∈ `monitoring` (runs + price matrices, saved in `exports/monitoring/`), `urls` (`exports/urls/`), `root` (legacy pre-split files). |
 | GET/DELETE | `/api/exports/<etype>/<filename>` | Typed download/delete (path-traversal-safe per subdir). |
 | GET/DELETE | `/api/exports/<filename>` | Legacy root-dir download/delete. |
-| POST | `/api/exports/add-urls` | **URL enrichment**: multipart `file` (.xls/.xlsx АВК-5) + form `column` (Excel letter; empty = append after last column) + `dups` (`all` = every repeat row gets the URL 1:1, `first` = only first occurrence). Rows matched by АВК code, fallback exact name; URL = cheapest supplier's product page (`_best_url_for_item`). .xlsx keeps formatting; .xls converted values-only. Saves to `exports/urls/`, returns `{filename, download, filled, rows, dup_skipped, not_found, converted_from_xls}`. ⚠ `_enrich_worksheet` reads code from column B and name from column C — the КД_ПВР layout. In КД_РЛМТ files column C is «Варіант ціни», so those rows match by code only (Known issue #17). |
+| POST | `/api/exports/add-urls` | **URL enrichment**: multipart `file` (.xls/.xlsx АВК-5) + form `column` (Excel letter; empty = append after last column) + `dups` (`all` = every repeat row gets the URL 1:1, `first` = only first occurrence). Rows matched by АВК code, fallback exact name; URL = cheapest supplier's product page (`_best_url_for_item`). .xlsx keeps formatting; .xls converted values-only. Saves to `exports/urls/`, returns `{filename, download, filled, rows, dup_skipped, not_found, converted_from_xls}`. Layout auto-detected by `_detect_layout()` (a «Розділ N» marker in column A → КД_РЛМТ): code is column B in both, name is column C (КД_ПВР) or D (КД_РЛМТ, after «Варіант ціни»); response also carries `layout`. |
 | GET | `/api/export/price-matrix` | All items × all suppliers matrix from DB `last_price` (+ min/max/spread columns, min-price cells highlighted). 400 if no availability data. |
 
 `_safe_export_path(filename)` strips characters, resolves inside `EXPORTS_DIR`, and rejects escapes — use it for any filename param.
@@ -635,7 +635,7 @@ There is no `.env.example`. `ANTHROPIC_API_KEY` (a leftover of the pre-Scrapling
 
 `/api/projects/<id>/export` (`routes/projects.py`, sheet «Кошторис», not saved to disk): Код АВК-5, Матеріал, Категорія, Од., К-сть, Ціна кошт., Сума кошт., one column per enabled supplier (`last_price`), Мін. ціна, Постачальник (мін.), Посилання, Сума мін., Економія % (green if positive, red if negative). КД_РЛМТ projects get the two section title rows (see §5).
 
-`/api/exports/add-urls` writes into a copy of the uploaded estimate → `exports/urls/` (see §5 and Known issue #17).
+`/api/exports/add-urls` writes into a copy of the uploaded estimate → `exports/urls/` (see §5).
 
 ---
 
@@ -701,7 +701,7 @@ For CRLF files: normalize `\r\n`→`\n` before replacing, restore after.
 
 15. ✅ *Fixed 2026-10:* Будпостач was never queried (only in the unused `HARDWARE_SUPPLIERS`) — now in `GENERAL_SUPPLIERS`, guarded by `tests/test_category_routing.py`.
 16. ⚠ **Item-ID collision in `batch_add_items()`** — IDs are `"%Y%m%d%H%M%S" + idx`; two imports within the same second can generate an ID that already exists. `INSERT OR IGNORE` then skips the new item while the project link still uses that ID, so it points at a different, older item. Fix: microsecond timestamp or `uuid4`, plus resolving the inserted ID after insert.
-17. ⚠ **URL enrichment ignores the КД_РЛМТ layout** — `_enrich_worksheet()` reads name from column C, which is «Варіант ціни» in КД_РЛМТ; such rows match by code only. Fix: detect the layout (Розділ markers) or take `doc_type` like the import routes.
+17. ✅ *Fixed 2026-10:* URL enrichment read the name from column C, which is «Варіант ціни» in КД_РЛМТ files (name matches silently failed) — layout is now auto-detected; covered by `tests/test_url_enrichment.py`.
 18. Unused code: JS `addAllToQueue()`, `origShowPanel`, `toggleAll()`; Python `get_items_for_supplier()`, `get_item_projects()`, `get_price_history_bulk()` (`item_db.py`).
 19. `index.html`'s static «Паралельно» options (1–3, default 3) are only a fallback — they are rebuilt from `/api/config` (1..`MAX_PARALLEL_ITEMS`, default `DEFAULT_PARALLEL_ITEMS`) at boot.
 
@@ -724,6 +724,7 @@ Run: `python -m pytest tests/ -v` — no network, pure logic. ⚠ `test_price_pa
 | `test_session_cache.py` | runner `_session_cache`: key includes the supplier set; not populated in discovery mode |
 | `test_excel_medals.py` | top-3 medal rank assignment |
 | `test_category_routing.py` | every registered supplier is reachable by routing; disabled suppliers never returned |
+| `test_url_enrichment.py` | add-urls layout detection; КД_ПВР and КД_РЛМТ rows matched by code and by name |
 
 ---
 

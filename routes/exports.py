@@ -406,18 +406,39 @@ def _load_upload_as_workbook(tmp_path: Path, suffix: str):
     return wb, True
 
 
+# 1-based column of the material name per кошторис layout. Code is column B
+# in both; КД_РЛМТ has an extra «Варіант ціни» column C, so its name is in D.
+_NAME_COL = {"pvr": 3, "rlmt": 4}
+
+
+def _detect_layout(ws) -> str:
+    """'rlmt' if column A has a «Розділ N» section marker, else 'pvr' —
+    the same signal the two parsers use to tell the layouts apart."""
+    from parsers.rlmt_parser import SECTION_RE
+    for r in range(1, ws.max_row + 1):
+        v = ws.cell(row=r, column=1).value
+        if v is not None and SECTION_RE.match(str(v).strip()):
+            return "rlmt"
+    return "pvr"
+
+
 def _enrich_worksheet(ws, by_code: dict, by_name: dict,
                       target_col: int | None, fill_all_dups: bool) -> dict:
     """Write URLs into `target_col` (or one past the last used column).
-    Returns stats: rows (item rows), filled, dup_skipped, not_found."""
+    Works for both КД_ПВР and КД_РЛМТ (layout auto-detected).
+    Returns stats: rows (item rows), filled, dup_skipped, not_found,
+    column, layout."""
     from parsers.kostoris_parser import CODE_RE
+    layout = _detect_layout(ws)
+    name_col = _NAME_COL[layout]
     col = target_col or (ws.max_column + 1)
-    stats = {"rows": 0, "filled": 0, "dup_skipped": 0, "not_found": 0, "column": col}
+    stats = {"rows": 0, "filled": 0, "dup_skipped": 0, "not_found": 0,
+             "column": col, "layout": layout}
     seen_keys: set = set()
     header_done = False
     for r in range(1, ws.max_row + 1):
         code = _clean_code(ws.cell(row=r, column=2).value)
-        name = _clean_name(ws.cell(row=r, column=3).value)
+        name = _clean_name(ws.cell(row=r, column=name_col).value)
         if not header_done and ("шифр" in code.lower() or "найменування" in name.lower()):
             ws.cell(row=r, column=col, value="Посилання")
             header_done = True

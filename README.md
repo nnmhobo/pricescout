@@ -196,7 +196,7 @@ The last run's results (also restored after an app restart), grouped by material
 ### 6. Exports — «Експорти»
 
 - Saved files are grouped into monitoring runs / price matrices and estimates with links, with download and delete buttons.
-- **«Додати посилання у кошторис»**: upload an estimate and get a copy with a link column filled from the database (the cheapest supplier's product page). Rows are matched by resource code, then by exact name. You can choose the target column and whether repeated rows all get the link («Повтори: заповнювати всі (1:1)») or only the first one. `.xlsx` keeps its formatting; `.xls` is converted to `.xlsx` (values only). Name matching currently works for the КД_ПВР layout; КД_РЛМТ files match by code only.
+- **«Додати посилання у кошторис»**: upload an estimate and get a copy with a link column filled from the database (the cheapest supplier's product page). Rows are matched by resource code, then by exact name. You can choose the target column and whether repeated rows all get the link («Повтори: заповнювати всі (1:1)») or only the first one. `.xlsx` keeps its formatting; `.xls` is converted to `.xlsx` (values only). Both КД_ПВР and КД_РЛМТ layouts are detected automatically.
 
 ### 7. Availability — «Наявність»
 
