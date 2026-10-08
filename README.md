@@ -246,7 +246,7 @@ python -m pytest tests/ -v
 
 The tests cover pure logic with no network: supplier routing reachability, URL enrichment for both estimate layouts, item-id uniqueness on import, fuzzy matching, price parsing, query simplification and variations, result sorting and manual overrides, batch controls, the run session cache, Excel medal ranking, and the export path-traversal guard. `tests/test_price_parsing.py` imports the scraping base and needs `scrapling` installed.
 
-`.github/workflows/notify-release-mail.yml`: every push to `main` creates a GitHub Release (`v<run number>`) with a zip of the code and emails the download link (SMTP credentials and the recipient come from repository secrets/variables).
+`.github/workflows/notify-release-mail.yml`: every push to `main` creates a GitHub Release (`v<run number>`) with a zip of the code and emails the download link (SMTP credentials and the recipient come from repository secrets).
 
 Before changing behaviour, read [`OVERVIEW.md`](OVERVIEW.md) — it lists conventions, thread-safety notes and known issues.
 

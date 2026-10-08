@@ -765,6 +765,6 @@ app.py
 
 Trigger: push to `main` (or manual `workflow_dispatch`). Steps: checkout → `git archive` → `PriceScout.zip` → `softprops/action-gh-release` creates release `v<run_number>` with the zip → `dawidd6/action-send-mail` emails the asset download link (Ukrainian text) via `smtp.zoho.eu:465`.
 
-- Secrets: `SMTP_USERNAME`, `SMTP_PASSWORD`; repository variable: `CUSTOMER_EMAIL`. Nothing sensitive is stored in the file.
+- Secrets: `SMTP_USERNAME`, `SMTP_PASSWORD`, `CUSTOMER_EMAIL` (a secret, not a variable — variables are printed unmasked in Actions logs, which are public for a public repo). Nothing sensitive is stored in the file.
 - Day-to-day work happens on `dev`; merging `dev` → `main` is what ships a release to the customer.
 - There is no test/lint job in CI — run `pytest` locally before merging.
