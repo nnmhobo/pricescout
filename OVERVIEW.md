@@ -110,7 +110,7 @@ All access goes through `core/item_db.py`, which uses a `@contextmanager get_con
 ### `items`
 | Column | Type | Notes |
 |---|---|---|
-| id | TEXT PK | ⚠ NOT a UUID. `add_item`: `datetime.now().strftime("%Y%m%d%H%M%S%f")`. `batch_add_items`: `"%Y%m%d%H%M%S" + f"{idx:06d}"` — ⚠ second resolution, can collide across two imports in the same second (Known issue #16) |
+| id | TEXT PK | ⚠ NOT a UUID. `add_item`: `datetime.now().strftime("%Y%m%d%H%M%S%f")`. `batch_add_items`: `"%Y%m%d%H%M%S%f"` + 6-digit counter, checked against existing ids; new entries are re-resolved by label after the insert so links never point at another item (fixed 2026-10, see Known issue #16) |
 | label | TEXT UNIQUE | Material name (display form). Dedupe key for imports. |
 | created | TEXT | ISO date `YYYY-MM-DD` |
 | source | TEXT | `'manual'` or `'kostoris'` |
@@ -700,7 +700,7 @@ For CRLF files: normalize `\r\n`→`\n` before replacing, restore after.
 **Found 2026-10-08 (documented, not yet fixed):**
 
 15. ✅ *Fixed 2026-10:* Будпостач was never queried (only in the unused `HARDWARE_SUPPLIERS`) — now in `GENERAL_SUPPLIERS`, guarded by `tests/test_category_routing.py`.
-16. ⚠ **Item-ID collision in `batch_add_items()`** — IDs are `"%Y%m%d%H%M%S" + idx`; two imports within the same second can generate an ID that already exists. `INSERT OR IGNORE` then skips the new item while the project link still uses that ID, so it points at a different, older item. Fix: microsecond timestamp or `uuid4`, plus resolving the inserted ID after insert.
+16. ✅ *Fixed 2026-10:* item-ID collision in `batch_add_items()` — second-resolution ids could repeat across two imports in the same second, and `INSERT OR IGNORE` then linked the project to a different, older item. Now microsecond ids + uniqueness check + re-resolve by label; covered by `tests/test_batch_add_items.py`.
 17. ✅ *Fixed 2026-10:* URL enrichment read the name from column C, which is «Варіант ціни» in КД_РЛМТ files (name matches silently failed) — layout is now auto-detected; covered by `tests/test_url_enrichment.py`.
 18. Unused code: JS `addAllToQueue()`, `origShowPanel`, `toggleAll()`; Python `get_items_for_supplier()`, `get_item_projects()`, `get_price_history_bulk()` (`item_db.py`).
 19. `index.html`'s static «Паралельно» options (1–3, default 3) are only a fallback — they are rebuilt from `/api/config` (1..`MAX_PARALLEL_ITEMS`, default `DEFAULT_PARALLEL_ITEMS`) at boot.
@@ -709,7 +709,7 @@ For CRLF files: normalize `\r\n`→`\n` before replacing, restore after.
 
 ## 16. Tests
 
-Run: `python -m pytest tests/ -v` — no network, pure logic. ⚠ `test_price_parsing.py` imports `scrapers._scrapling_base`, which imports `scrapling` at module level — it errors at collection where `scrapling` isn't installed (run `--ignore=tests/test_price_parsing.py` there). The parsers, `item_db` and the project/kostoris routes have no tests yet.
+Run: `python -m pytest tests/ -v` — no network, pure logic. ⚠ `test_price_parsing.py` imports `scrapers._scrapling_base`, which imports `scrapling` at module level — it errors at collection where `scrapling` isn't installed (run `--ignore=tests/test_price_parsing.py` there). The parsers and the project/kostoris routes have no tests yet.
 
 | Test file | Covers |
 |---|---|
@@ -725,6 +725,7 @@ Run: `python -m pytest tests/ -v` — no network, pure logic. ⚠ `test_price_pa
 | `test_excel_medals.py` | top-3 medal rank assignment |
 | `test_category_routing.py` | every registered supplier is reachable by routing; disabled suppliers never returned |
 | `test_url_enrichment.py` | add-urls layout detection; КД_ПВР and КД_РЛМТ rows matched by code and by name |
+| `test_batch_add_items.py` | temp SQLite DB: two imports at the same instant link their own items; existing labels reused |
 
 ---
 
